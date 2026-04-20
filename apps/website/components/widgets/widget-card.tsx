@@ -7,7 +7,9 @@ import { Card } from "@/components/ui/card";
 import { useAppWebSocket } from "@/hooks/use-websocket";
 import { cn } from "@/lib/utils";
 
-export function WidgetCard({ children, className, ...props }: React.ComponentProps<typeof Card>) {
+type Props = React.ComponentProps<typeof Card>;
+
+export function WidgetCard({ children, className, ...props }: Props) {
   const websocket = useAppWebSocket();
   const isDisconnected = websocket.readyState !== ReadyState.OPEN;
 

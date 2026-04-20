@@ -1,6 +1,6 @@
 import React from "react";
 
-import { ServoWidget } from "@/components/widgets/servo-widget";
+import { ServoWidget } from "@/components/widgets/servo-widget/servo-widget";
 
 export default function Page() {
   return (

@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import React from "react";
 
-import { Header } from "@/components/layout/header";
+import { Header } from "@/components/layout/header/header";
 import { cn } from "@/lib/utils";
 
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
