@@ -4,7 +4,7 @@ export function StatusBadgeClosed() {
   return (
     <>
       <span className="bg-destructive size-2 rounded-full" />
-      <span>Disconnected</span>
+      <span>DISCONNECTED</span>
     </>
   );
 }

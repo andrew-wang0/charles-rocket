@@ -7,7 +7,7 @@ export function StatusBadgeConnecting() {
         <span className="bg-warning animation-duration-[500ms] absolute animate-ping rounded-full" />
         <span className="bg-warning relative rounded-full" />
       </span>
-      <span>Connecting</span>
+      <span>CONNECTING</span>
     </>
   );
 }
