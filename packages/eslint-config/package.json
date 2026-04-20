@@ -1,0 +1,38 @@
+{
+  "name": "@packages/eslint-config",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./eslint.config.js",
+    "./next": "./eslint.config.next.js",
+    "./react": "./eslint.config.react.js"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "lint": "eslint --fix --max-warnings=0"
+  },
+  "lint-staged": {
+    "*": [
+      "prettier --write"
+    ],
+    "*.js": [
+      "eslint --fix --max-warnings=0"
+    ]
+  },
+  "prettier": "@packages/prettier-config",
+  "devDependencies": {
+    "@eslint/eslintrc": "3.3.5",
+    "@next/eslint-plugin-next": "16.2.4",
+    "@typescript-eslint/eslint-plugin": "8.59.0",
+    "@typescript-eslint/parser": "8.59.0",
+    "eslint-config-next": "16.2.4",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-mdx": "3.7.0",
+    "eslint-plugin-only-warn": "1.2.1",
+    "eslint-plugin-prettier": "5.5.5",
+    "eslint-plugin-react": "7.37.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "eslint-plugin-simple-import-sort": "13.0.0",
+    "eslint-plugin-unused-imports": "4.4.1"
+  }
+}

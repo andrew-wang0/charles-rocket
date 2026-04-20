@@ -1,0 +1,13 @@
+{
+  "name": "@packages/typescript-config",
+  "private": true,
+  "scripts": {
+    "format": "prettier --write ."
+  },
+  "lint-staged": {
+    "*": [
+      "prettier --write"
+    ]
+  },
+  "prettier": "@packages/prettier-config"
+}
