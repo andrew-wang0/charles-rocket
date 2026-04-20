@@ -4,12 +4,13 @@ import type { Metadata } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import React from "react";
 
+import { Header } from "@/components/layout/header";
 import { cn } from "@/lib/utils";
 
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "Charles",
+  title: "Charles Dashboard",
 };
 
 export default function RootLayout({
@@ -19,7 +20,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn("font-mono", jetbrainsMono.variable)}>
-      <body className={jetbrainsMono.className}>{children}</body>
+      <body className={jetbrainsMono.className}>
+        <Header />
+        {children}
+      </body>
     </html>
   );
 }
