@@ -4,8 +4,8 @@ import React from "react";
 import { ReadyState } from "react-use-websocket";
 
 import { StatusBadgeClosed } from "@/components/layout/header/status-badge/status-badge-closed";
+import { StatusBadgeConnected } from "@/components/layout/header/status-badge/status-badge-connected";
 import { StatusBadgeConnecting } from "@/components/layout/header/status-badge/status-badge-connecting";
-import { StatusBadgeOpen } from "@/components/layout/header/status-badge/status-badge-open";
 import { StatusBadgeUnknown } from "@/components/layout/header/status-badge/status-badge-unknown";
 import { Badge } from "@/components/ui/badge";
 import { useAppWebSocket } from "@/hooks/use-websocket";
@@ -17,23 +17,25 @@ export function StatusBadge() {
 
   switch (websocket.readyState) {
     case ReadyState.CONNECTING:
-      badgeContent = StatusBadgeConnecting();
+      badgeContent = <StatusBadgeConnecting />;
       break;
     case ReadyState.OPEN:
-      badgeContent = StatusBadgeOpen();
+      badgeContent = <StatusBadgeConnected />;
       break;
     case ReadyState.CLOSING:
     case ReadyState.CLOSED:
-      badgeContent = StatusBadgeClosed();
+      badgeContent = <StatusBadgeClosed />;
       break;
     default:
-      badgeContent = StatusBadgeUnknown();
+      badgeContent = <StatusBadgeUnknown />;
   }
 
   return (
-    <Badge variant="default">
-      <span className="tmf border-r pr-1">Status:</span>
-      {badgeContent}
-    </Badge>
+    <div className="flex">
+      <Badge variant="secondary" className="border-r-0">
+        Status
+      </Badge>
+      <Badge variant="default">{badgeContent}</Badge>
+    </div>
   );
 }

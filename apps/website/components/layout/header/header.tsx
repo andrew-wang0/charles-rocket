@@ -1,6 +1,6 @@
 import React from "react";
 
-import { StatusBadge } from "@/components/layout/header/status-badge";
+import { StatusBadge } from "@/components/layout/header/status-badge/status-badge";
 
 export function Header() {
   return (
