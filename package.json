@@ -24,7 +24,7 @@
     "@packages/prettier-config": "workspace:*",
     "@packages/typescript-config": "workspace:*",
     "@types/node": "25.6.0",
-    "eslint": "10.2.1",
+    "eslint": "9.39.4",
     "husky": "9.1.7",
     "lint-staged": "16.4.0",
     "prettier": "3.8.3",
