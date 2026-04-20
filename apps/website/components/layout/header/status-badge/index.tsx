@@ -31,7 +31,7 @@ export function StatusBadge() {
   }
 
   return (
-    <Badge variant="secondary">
+    <Badge variant="default">
       <span className="tmf border-r pr-1">Status:</span>
       {badgeContent}
     </Badge>

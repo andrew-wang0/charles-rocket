@@ -4,7 +4,7 @@ import { StatusBadge } from "@/components/layout/header/status-badge";
 
 export function Header() {
   return (
-    <header className="border-b p-2">
+    <header className="px-4 py-2">
       <div className="flex items-center justify-between">
         <p className="space-x-2 text-xl">
           <span className="text-xl font-bold">Charles</span>
