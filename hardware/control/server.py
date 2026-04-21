@@ -182,5 +182,10 @@ async def handler(websocket: Any, _path: str | None = None) -> None:
 async def main() -> None:
     logging.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
 
-    async with websockets.serve(handler, HOST, PORT):
-        await asyncio.Future()
+    try:
+        async with websockets.serve(handler, HOST, PORT):
+            await asyncio.Future()
+    except asyncio.CancelledError:
+        logging.info("server cancelled")
+    finally:
+        servo_controller.close()
