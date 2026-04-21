@@ -9,12 +9,13 @@ import { cn } from "@/lib/utils";
 
 type Props = React.ComponentProps<typeof Button>;
 
-export function WidgetLockableButton({ children, className, ...props }: Props) {
+export function WidgetLockableButton({ children, className, disabled, ...props }: Props) {
   const { locked } = useWidgetLock();
+
   return (
     <Button
       variant="outline"
-      disabled={locked}
+      disabled={locked || disabled}
       className={cn("relative shadow-md", className)}
       {...props}
     >
