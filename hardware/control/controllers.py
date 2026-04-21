@@ -63,6 +63,7 @@ class ServoController:
                     actuation_range=SERVO_ACTUATION_RANGE,
                 )
 
+            self._set_startup_state()
             self.available = True
             logger.info(
                 "servo hardware ready: address=0x%02x frequency=%sHz closed=%s open=%s",
@@ -121,6 +122,11 @@ class ServoController:
         self._servos[channel].angle = angle
         self._angles[channel] = angle
         logger.info("servo angle set: channel=%s target=%s angle=%s", channel, target_state, angle)
+
+    def _set_startup_state(self) -> None:
+        for channel in SERVO_CHANNELS:
+            self._set_angle_sync(channel, "closed")
+            self._states[channel] = "closed"
 
     async def toggle_servo(self, channel: int) -> tuple[list[int], ServoStableState]:
         async with self._lock:
