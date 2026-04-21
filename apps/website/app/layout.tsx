@@ -20,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn("font-mono", jetbrainsMono.variable)}>
-      <body className={jetbrainsMono.className}>
+      <body className={cn(jetbrainsMono.className, "flex min-h-dvh flex-col")}>
         <Header />
         {children}
       </body>

@@ -1,9 +1,12 @@
 import React from "react";
 
 import { CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { ServoManualControl } from "@/components/widgets/servo-widget/servo-manual-control";
+import { ServoQuickControl } from "@/components/widgets/servo-widget/servo-quick-control";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { WidgetLockProvider } from "@/components/widgets/widget-lock";
-import { WidgetLockButton } from "@/components/widgets/widget-lock-button";
+import { WidgetLockToggleButton } from "@/components/widgets/widget-lock-toggle-button";
 
 export function ServoWidget() {
   return (
@@ -12,10 +15,14 @@ export function ServoWidget() {
         <CardHeader>
           <CardTitle>Servo Control</CardTitle>
           <CardAction>
-            <WidgetLockButton />
+            <WidgetLockToggleButton />
           </CardAction>
         </CardHeader>
-        <CardContent>X</CardContent>
+        <CardContent className="flex flex-1 gap-x-2">
+          <ServoQuickControl />
+          <Separator orientation="vertical" />
+          <ServoManualControl className="h-full w-8/12" />
+        </CardContent>
       </WidgetCard>
     </WidgetLockProvider>
   );

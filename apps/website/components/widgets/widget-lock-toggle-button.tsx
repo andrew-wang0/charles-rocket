@@ -6,7 +6,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { useWidgetLock } from "@/components/widgets/widget-lock";
 
-export function WidgetLockButton() {
+export function WidgetLockToggleButton() {
   const { locked, toggleLock } = useWidgetLock();
 
   return (
