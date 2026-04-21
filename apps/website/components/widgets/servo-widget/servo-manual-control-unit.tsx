@@ -20,8 +20,9 @@ function getStatusClassName(state: ServoStatus) {
     case ServoStatus.CLOSED:
       return "bg-destructive/10 text-destructive border-destructive/30";
     case ServoStatus.OPENING:
+      return "bg-positive/20 text-positive border-positive/40 animate-pulse animation-duration-[250ms]";
     case ServoStatus.CLOSING:
-      return "bg-warning/20 text-warning border-warning/40";
+      return "bg-destructive/20 text-destructive border-destructive/40 animate-pulse animation-duration-[250ms]";
     default:
       return "bg-muted text-muted-foreground border-border";
   }

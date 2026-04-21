@@ -10,6 +10,7 @@ import {
   type ServoChannel,
   type ServoChannelState,
   type ServoStatePayload,
+  ServoStatus,
 } from "@/types/websocket";
 
 type Props = {
@@ -22,7 +23,7 @@ function getServoState(channels: ServoChannelState[], channel: ServoChannel): Se
   return (
     channels.find((servo) => servo.channel === channel) ?? {
       channel,
-      state: "unknown",
+      state: ServoStatus.UNKNOWN,
     }
   );
 }

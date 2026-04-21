@@ -27,11 +27,7 @@ export function ServoWidget() {
           </CardAction>
         </CardHeader>
         <CardContent className="flex flex-1 gap-x-2">
-          <ServoQuickControl
-            disabled={!servoControl.isConnected || hasSwitchingServo}
-            onOpenAll={servoControl.openAllServos}
-            onCloseAll={servoControl.closeAllServos}
-          />
+          <ServoQuickControl disabled={!servoControl.isConnected || hasSwitchingServo} />
           <Separator orientation="vertical" />
           <ServoManualControl
             className="h-full w-8/12"

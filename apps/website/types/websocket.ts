@@ -7,6 +7,7 @@ export enum ServoStatus {
   OPEN = "open",
   CLOSING = "closing",
   CLOSED = "closed",
+  UNKNOWN = "unknown",
 }
 
 export const ServoChannelSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]);
@@ -51,10 +52,8 @@ export type HardwareServerMessage = z.infer<typeof HardwareServerMessageSchema>;
 export type HardwareClientMessage =
   | { command: "get_state" }
   | { command: "toggle_servo"; channel: ServoChannel }
-  | { command: "open_servo"; channel: ServoChannel }
-  | { command: "close_servo"; channel: ServoChannel }
-  | { command: "open_all_servos" }
-  | { command: "close_all_servos" };
+  | { command: "open_servo"; channel: ServoChannel | ServoChannel[] }
+  | { command: "close_servo"; channel: ServoChannel | ServoChannel[] };
 
 export function parseHardwareServerMessage(message: unknown) {
   return HardwareServerMessageSchema.safeParse(message);

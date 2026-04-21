@@ -69,6 +69,13 @@ def parse_channel(raw_channel: Any) -> int:
     return raw_channel
 
 
+def parse_channels(raw_channels: Any) -> list[int]:
+    if isinstance(raw_channels, list):
+        return [parse_channel(channel) for channel in raw_channels]
+
+    return [parse_channel(raw_channels)]
+
+
 async def run_transition(channels: list[int], target_state: ServoStableState) -> None:
     await broadcast_state()
     if not channels:
@@ -78,13 +85,14 @@ async def run_transition(channels: list[int], target_state: ServoStableState) ->
     await broadcast_state()
 
 
-async def set_single_servo(
+async def set_servos(
     websocket: Any,
     data: dict[str, Any],
     target_state: ServoStableState,
 ) -> None:
     try:
-        channels = await servo_controller.set_servo(parse_channel(data.get("channel")), target_state)
+        raw_channels = data.get("channel", data.get("channels"))
+        channels = await servo_controller.set_servos(parse_channels(raw_channels), target_state)
     except ValueError as exc:
         await send_error(websocket, str(exc))
         return
@@ -129,25 +137,11 @@ async def handle_message(websocket: Any, message: str) -> None:
         return
 
     if command == "open_servo":
-        await set_single_servo(websocket, data, "open")
+        await set_servos(websocket, data, "open")
         return
 
     if command == "close_servo":
-        await set_single_servo(websocket, data, "closed")
-        return
-
-    if command == "open_all_servos":
-        try:
-            await set_all_servos("open")
-        except ValueError as exc:
-            await send_error(websocket, str(exc))
-        return
-
-    if command == "close_all_servos":
-        try:
-            await set_all_servos("closed")
-        except ValueError as exc:
-            await send_error(websocket, str(exc))
+        await set_servos(websocket, data, "closed")
         return
 
     await send_error(websocket, "unknown_command")

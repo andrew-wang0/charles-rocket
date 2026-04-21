@@ -5,7 +5,7 @@ import { ReadyState } from "react-use-websocket";
 
 import { useAppWebSocket } from "@/hooks/use-websocket";
 import { getHardwareStateSnapshot, subscribeHardwareState } from "@/lib/hardware-state-store";
-import type { HardwareClientMessage, ServoChannel } from "@/types/websocket";
+import { type HardwareClientMessage, SERVO_CHANNELS, type ServoChannel } from "@/types/websocket";
 
 export function useServoControl() {
   const { readyState, sendJsonMessage } = useAppWebSocket();
@@ -38,9 +38,12 @@ export function useServoControl() {
     isConnected: readyState === ReadyState.OPEN,
     lastError: hardwareState.lastError,
     toggleServo: (channel: ServoChannel) => sendServoCommand({ command: "toggle_servo", channel }),
-    openServo: (channel: ServoChannel) => sendServoCommand({ command: "open_servo", channel }),
-    closeServo: (channel: ServoChannel) => sendServoCommand({ command: "close_servo", channel }),
-    openAllServos: () => sendServoCommand({ command: "open_all_servos" }),
-    closeAllServos: () => sendServoCommand({ command: "close_all_servos" }),
+    openServo: (channel: ServoChannel | ServoChannel[]) =>
+      sendServoCommand({ command: "open_servo", channel }),
+    closeServo: (channel: ServoChannel | ServoChannel[]) =>
+      sendServoCommand({ command: "close_servo", channel }),
+    openAllServos: () => sendServoCommand({ command: "open_servo", channel: [...SERVO_CHANNELS] }),
+    closeAllServos: () =>
+      sendServoCommand({ command: "close_servo", channel: [...SERVO_CHANNELS] }),
   };
 }

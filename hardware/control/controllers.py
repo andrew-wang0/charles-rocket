@@ -142,6 +142,17 @@ class ServoController:
             self._ensure_available()
             return await self._start_transitions([channel], target_state)
 
+    async def set_servos(self, channels: list[int], target_state: ServoStableState) -> list[int]:
+        async with self._lock:
+            if not channels:
+                raise ValueError("invalid_channel")
+
+            for channel in channels:
+                self._validate_channel(channel)
+
+            self._ensure_available()
+            return await self._start_transitions(channels, target_state)
+
     async def set_all_servos(self, target_state: ServoStableState) -> list[int]:
         async with self._lock:
             self._ensure_available()

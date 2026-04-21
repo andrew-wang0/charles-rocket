@@ -2,6 +2,7 @@ import {
   parseHardwareServerMessage,
   SERVO_CHANNELS,
   type ServoStatePayload,
+  ServoStatus,
 } from "@/types/websocket";
 
 type HardwareStateSnapshot = {
@@ -12,7 +13,7 @@ type HardwareStateSnapshot = {
 const INITIAL_SERVO_STATE: ServoStatePayload = {
   channels: SERVO_CHANNELS.map((channel) => ({
     channel,
-    state: "unknown",
+    state: ServoStatus.UNKNOWN,
   })),
 };
 
