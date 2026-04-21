@@ -16,7 +16,7 @@ export function WidgetCard({ children, className, ...props }: Props) {
   return (
     <Card
       aria-disabled={isDisconnected}
-      className={cn("relative", isDisconnected && "cursor-not-allowed select-none", className)}
+      className={cn("relative", isDisconnected && "pointer-events-none select-none", className)}
       {...props}
     >
       {children}
@@ -29,7 +29,7 @@ export function WidgetCard({ children, className, ...props }: Props) {
             "flex items-center justify-center",
           )}
         >
-          <div className="bg-muted-foreground/10 border-border border-2 p-1">DISCONNECTED</div>
+          <div className="bg-accent border-border border-2 p-1">DISCONNECTED</div>
         </div>
       ) : null}
     </Card>
