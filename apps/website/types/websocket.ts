@@ -2,10 +2,17 @@ import { z } from "zod";
 
 export const SERVO_CHANNELS = [0, 1, 2] as const;
 
+export enum ServoStatus {
+  OPENING = "opening",
+  OPEN = "open",
+  CLOSING = "closing",
+  CLOSED = "closed",
+}
+
 export const ServoChannelSchema = z.union([z.literal(0), z.literal(1), z.literal(2)]);
 export const ServoStableStateSchema = z.enum(["open", "closed"]);
 export const ServoTransitionStateSchema = z.enum(["opening", "closing"]);
-export const ServoStatusSchema = z.enum(["open", "closed", "opening", "closing", "unknown"]);
+export const ServoStatusSchema = z.enum(ServoStatus);
 
 export const ServoChannelStateSchema = z.object({
   channel: ServoChannelSchema,
@@ -35,7 +42,6 @@ export const HardwareServerMessageSchema = z.discriminatedUnion("type", [
 export type ServoChannel = z.infer<typeof ServoChannelSchema>;
 export type ServoStableState = z.infer<typeof ServoStableStateSchema>;
 export type ServoTransitionState = z.infer<typeof ServoTransitionStateSchema>;
-export type ServoStatus = z.infer<typeof ServoStatusSchema>;
 export type ServoChannelState = z.infer<typeof ServoChannelStateSchema>;
 export type ServoStatePayload = z.infer<typeof ServoStatePayloadSchema>;
 export type ServoStateMessage = z.infer<typeof ServoStateMessageSchema>;

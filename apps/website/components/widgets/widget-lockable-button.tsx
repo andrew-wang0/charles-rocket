@@ -21,7 +21,7 @@ export function WidgetLockableButton({ children, className, disabled, ...props }
     >
       {children}
       {locked && (
-        <div className="bg-muted-foreground/20 absolute flex size-full items-center justify-center backdrop-blur-[2px]">
+        <div className="bg-muted-foreground/20 absolute flex size-full items-center justify-center backdrop-blur-sm">
           <LockSimpleIcon weight="fill" />
         </div>
       )}

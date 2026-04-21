@@ -4,7 +4,8 @@ import React from "react";
 
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { cn } from "@/lib/utils";
-import type { ServoChannel, ServoChannelState, ServoStatus } from "@/types/websocket";
+import type { ServoChannel, ServoChannelState } from "@/types/websocket";
+import { ServoStatus } from "@/types/websocket";
 
 type Props = {
   canSendCommands: boolean;
@@ -14,13 +15,13 @@ type Props = {
 
 function getStatusClassName(state: ServoStatus) {
   switch (state) {
-    case "open":
+    case ServoStatus.OPEN:
       return "bg-positive/20 text-positive border-positive/40";
-    case "closed":
+    case ServoStatus.CLOSED:
       return "bg-destructive/10 text-destructive border-destructive/30";
-    case "opening":
-    case "closing":
-      return "bg-warning/20 text-warning border-warning/40 animate-pulse";
+    case ServoStatus.OPENING:
+    case ServoStatus.CLOSING:
+      return "bg-warning/20 text-warning border-warning/40";
     default:
       return "bg-muted text-muted-foreground border-border";
   }
