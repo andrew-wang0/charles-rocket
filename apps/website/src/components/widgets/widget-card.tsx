@@ -12,12 +12,12 @@ type Props = React.ComponentProps<typeof Card>;
 export function WidgetCard({ children, className, ...props }: Props) {
   const status = useConnectionStatus();
 
-  const isOpen = status === ConnectionStatus.OPEN;
+  const isOpen = status === ConnectionStatus.CONNECTED;
 
   return (
     <Card
       aria-disabled={!isOpen}
-      className={cn("relative", !isOpen && "pointer-events-none select-none", className)}
+      className={cn("relative", !isOpen && "pointer-events-none grayscale select-none", className)}
       {...props}
     >
       {children}

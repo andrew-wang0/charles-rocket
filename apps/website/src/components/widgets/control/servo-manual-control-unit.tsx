@@ -2,6 +2,7 @@
 
 import React from "react";
 
+import { client } from "@/client";
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { useServo } from "@/hooks/use-servo";
 import { cn } from "@/lib/utils";
@@ -28,6 +29,25 @@ function getStatusClassName(state: ServoState) {
 
 export function ServoManualControlUnit({ index, className, ...props }: Props) {
   const servo = useServo(index);
+  const [isPending, setIsPending] = React.useState(false);
+  const isDisabled = servo.isSwitching || servo.state === ServoState.UNKNOWN || isPending;
+
+  async function handleSwitch() {
+    if (isDisabled) return;
+
+    setIsPending(true);
+
+    try {
+      await client.servoControl({
+        index: index + 1,
+        set: servo.isOpen ? ServoState.CLOSED : ServoState.OPEN,
+      });
+    } catch (error) {
+      console.error(`Failed to switch servo ${index + 1}`, error);
+    } finally {
+      setIsPending(false);
+    }
+  }
 
   return (
     <div className={cn("flex h-full flex-col items-center justify-between", className)} {...props}>
@@ -41,9 +61,9 @@ export function ServoManualControlUnit({ index, className, ...props }: Props) {
         <span>{servo.state}</span>
       </div>
       <WidgetLockableButton
-        disabled={servo.isSwitching}
+        disabled={isDisabled}
         onClick={() => {
-          /* TODO */
+          void handleSwitch();
         }}
       >
         SWITCH

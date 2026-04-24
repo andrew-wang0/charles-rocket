@@ -1,6 +1,8 @@
 import { intervalToDuration } from "date-fns";
 import React, { useEffect, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+
 function pad(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -24,10 +26,10 @@ export function StatusBadgeConnected() {
   const elapsed = `${pad(totalHours)}:${pad(d.minutes || 0)}:${pad(d.seconds || 0)}`;
 
   return (
-    <>
+    <Badge>
       <span className="bg-positive animation-duration-[500ms] size-2 animate-pulse rounded-full" />
       <span>CONNECTED</span>
       <span className="text-muted-foreground font-light">{elapsed}</span>
-    </>
+    </Badge>
   );
 }

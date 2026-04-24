@@ -3,12 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from .constants import HOST, PORT
+from .constants import HOST, PORT, SERVO_CHANNELS
 from .controllers import ServoController, ServoStableState
 
 logging.basicConfig(
@@ -16,16 +16,107 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 
+JSONRPC_VERSION = "2.0"
+PARSE_ERROR = -32700
+INVALID_REQUEST = -32600
+METHOD_NOT_FOUND = -32601
+INVALID_PARAMS = -32602
+INTERNAL_ERROR = -32603
+SERVER_ERROR = -32000
+
+PRESSURE_SENSOR_COUNT = 3
+SERVO_CHANNEL_BY_INDEX = {
+    index: channel for index, channel in enumerate(SERVO_CHANNELS, start=1)
+}
+SERVO_INDEX_BY_CHANNEL = {
+    channel: index for index, channel in SERVO_CHANNEL_BY_INDEX.items()
+}
+
 servo_controller = ServoController()
+ignition_state = "UNKNOWN"
 clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
+transition_tasks: set[asyncio.Task[None]] = set()
 
 
-def state_payload() -> dict[str, Any]:
+def ok(request_id: Any, result: Any) -> dict[str, Any]:
     return {
-        "type": "state",
-        "servo": servo_controller.state_payload(),
+        "jsonrpc": JSONRPC_VERSION,
+        "id": request_id,
+        "result": result,
     }
+
+
+def err(
+    request_id: Any,
+    code: int,
+    message: str,
+    data: Any | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "jsonrpc": JSONRPC_VERSION,
+        "id": request_id,
+        "error": {
+            "code": code,
+            "message": message,
+        },
+    }
+
+    if data is not None:
+        payload["error"]["data"] = data
+
+    return payload
+
+
+def notify(method: str, params: Any) -> dict[str, Any]:
+    return {
+        "jsonrpc": JSONRPC_VERSION,
+        "method": method,
+        "params": params,
+    }
+
+
+def build_servo_snapshot() -> dict[str, list[dict[str, Any]]]:
+    channels = sorted(
+        servo_controller.state_payload()["channels"],
+        key=lambda channel_state: SERVO_INDEX_BY_CHANNEL[channel_state["channel"]],
+    )
+
+    return {
+        "states": [
+            {
+                "index": SERVO_INDEX_BY_CHANNEL[channel_state["channel"]],
+                "state": str(channel_state["state"]).upper(),
+            }
+            for channel_state in channels
+        ]
+    }
+
+
+def build_readings_result() -> dict[str, Any]:
+    return {
+        "status": {
+            "servoControllerOk": servo_controller.available,
+            "pressureSensorsOk": [False] * PRESSURE_SENSOR_COUNT,
+            "loadSensorOk": False,
+        },
+        "data": {
+            "load": [],
+            "pressure": [[] for _ in range(PRESSURE_SENSOR_COUNT)],
+        },
+    }
+
+
+def parse_servo_target(value: Any) -> ServoStableState:
+    normalized = str(value).lower()
+
+    if normalized == "open":
+        return cast(ServoStableState, "open")
+
+    if normalized == "closed":
+        return cast(ServoStableState, "closed")
+
+    raise ValueError("Invalid params")
 
 
 async def send_text(websocket: Any, payload: str) -> bool:
@@ -41,20 +132,19 @@ async def send_text(websocket: Any, payload: str) -> bool:
         return False
 
 
-async def send_json(websocket: Any, payload: dict[str, Any]) -> bool:
+async def send_json(websocket: Any, payload: Any) -> bool:
     return await send_text(websocket, json.dumps(payload))
 
 
-async def send_error(websocket: Any, reason: str) -> None:
-    await send_json(websocket, {"type": "error", "error": reason})
-
-
-async def broadcast_state() -> None:
-    payload = json.dumps(state_payload())
-    disconnected = []
+async def broadcast_json(payload: Any, *, exclude: Any | None = None) -> None:
+    serialized = json.dumps(payload)
+    disconnected: list[Any] = []
 
     for websocket in tuple(clients):
-        sent = await send_text(websocket, payload)
+        if websocket == exclude:
+            continue
+
+        sent = await send_text(websocket, serialized)
         if not sent:
             disconnected.append(websocket)
 
@@ -63,100 +153,188 @@ async def broadcast_state() -> None:
         client_send_locks.pop(websocket, None)
 
 
-def parse_channel(raw_channel: Any) -> int:
-    if isinstance(raw_channel, bool) or not isinstance(raw_channel, int):
-        raise ValueError("invalid_channel")
-    return raw_channel
+async def broadcast_servo_state(*, exclude: Any | None = None) -> None:
+    await broadcast_json(
+        notify("servoState", build_servo_snapshot()),
+        exclude=exclude,
+    )
 
 
-def parse_channels(raw_channels: Any) -> list[int]:
-    if isinstance(raw_channels, list):
-        return [parse_channel(channel) for channel in raw_channels]
-
-    return [parse_channel(raw_channels)]
-
-
-async def run_transition(channels: list[int], target_state: ServoStableState) -> None:
-    await broadcast_state()
-    if not channels:
-        return
-
-    await servo_controller.finish_transitions(channels, target_state)
-    await broadcast_state()
-
-
-async def set_servos(
-    websocket: Any,
-    data: dict[str, Any],
+async def finish_servo_transition(
+    channels: list[int],
     target_state: ServoStableState,
 ) -> None:
     try:
-        raw_channels = data.get("channel", data.get("channels"))
-        channels = await servo_controller.set_servos(parse_channels(raw_channels), target_state)
-    except ValueError as exc:
-        await send_error(websocket, str(exc))
-        return
-
-    await run_transition(channels, target_state)
-
-
-async def set_all_servos(target_state: ServoStableState) -> None:
-    channels = await servo_controller.set_all_servos(target_state)
-    await run_transition(channels, target_state)
+        await servo_controller.finish_transitions(channels, target_state)
+        await broadcast_servo_state()
+    except Exception:
+        logging.exception(
+            "failed to finish servo transition: channels=%s target=%s",
+            channels,
+            target_state,
+        )
 
 
-async def toggle_servo(websocket: Any, data: dict[str, Any]) -> None:
+def track_transition_task(task: asyncio.Task[None]) -> None:
+    transition_tasks.add(task)
+
+    def cleanup(done: asyncio.Task[None]) -> None:
+        transition_tasks.discard(done)
+
+        if done.cancelled():
+            return
+
+        exception = done.exception()
+        if exception is not None:
+            logging.error(
+                "background servo task failed",
+                exc_info=(type(exception), exception, exception.__traceback__),
+            )
+
+    task.add_done_callback(cleanup)
+
+
+async def handle_servo_control(
+    websocket: Any,
+    params: Any,
+) -> dict[str, Any]:
+    if not isinstance(params, dict):
+        raise ValueError("Invalid params")
+
     try:
-        channel = parse_channel(data.get("channel"))
-        channels, target_state = await servo_controller.toggle_servo(channel)
-    except ValueError as exc:
-        await send_error(websocket, str(exc))
-        return
+        index = int(params["index"])
+        channel = SERVO_CHANNEL_BY_INDEX[index]
+        target_state = parse_servo_target(params["set"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid params") from exc
 
-    await run_transition(channels, target_state)
+    try:
+        transitioned_channels = await servo_controller.set_servo(channel, target_state)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    snapshot = build_servo_snapshot()
+
+    if transitioned_channels:
+        await broadcast_servo_state(exclude=websocket)
+        track_transition_task(
+            asyncio.create_task(finish_servo_transition(transitioned_channels, target_state))
+        )
+
+    return {
+        "result": "success",
+        **snapshot,
+    }
+
+
+def handle_ignition_control(params: Any) -> dict[str, Any]:
+    global ignition_state
+
+    if not isinstance(params, dict) or "set" not in params:
+        raise ValueError("Invalid params")
+
+    ignition_state = str(params["set"]).upper()
+
+    return {
+        "result": "success",
+        "state": ignition_state,
+    }
+
+
+async def dispatch_request(
+    websocket: Any,
+    method: str,
+    params: Any,
+) -> dict[str, Any]:
+    if method == "servoControl":
+        return await handle_servo_control(websocket, params)
+
+    if method == "servoState":
+        return build_servo_snapshot()
+
+    if method == "ignitionControl":
+        return handle_ignition_control(params)
+
+    if method == "readings":
+        return build_readings_result()
+
+    raise LookupError("Method not found")
+
+
+async def handle_request_payload(
+    websocket: Any,
+    payload: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return err(None, INVALID_REQUEST, "Invalid Request")
+
+    request_id = payload.get("id")
+    should_respond = "id" in payload
+    method = payload.get("method")
+    params = payload.get("params")
+
+    if payload.get("jsonrpc") != JSONRPC_VERSION or not isinstance(method, str):
+        return err(request_id if should_respond else None, INVALID_REQUEST, "Invalid Request")
+
+    try:
+        result = await dispatch_request(websocket, method, params)
+    except LookupError:
+        if not should_respond:
+            return None
+        return err(request_id, METHOD_NOT_FOUND, "Method not found")
+    except ValueError as exc:
+        if not should_respond:
+            return None
+        return err(request_id, INVALID_PARAMS, str(exc))
+    except RuntimeError as exc:
+        if not should_respond:
+            return None
+        return err(request_id, SERVER_ERROR, str(exc))
+    except Exception as exc:
+        logging.exception("unhandled rpc error: method=%s", method)
+        if not should_respond:
+            return None
+        return err(request_id, INTERNAL_ERROR, "Internal error", {"message": str(exc)})
+
+    if not should_respond:
+        return None
+
+    return ok(request_id, result)
 
 
 async def handle_message(websocket: Any, message: str) -> None:
     try:
-        data = json.loads(message)
-    except json.JSONDecodeError:
-        await send_error(websocket, "invalid_json")
+        payload = json.loads(message)
+    except json.JSONDecodeError as exc:
+        await send_json(
+            websocket,
+            err(None, PARSE_ERROR, "Parse error", {"message": str(exc)}),
+        )
         return
 
-    if not isinstance(data, dict):
-        await send_error(websocket, "invalid_payload")
+    if isinstance(payload, list):
+        await send_json(
+            websocket,
+            err(None, INVALID_REQUEST, "Batch requests are not supported"),
+        )
         return
 
-    command = data.get("command")
-    if command == "get_state":
-        await send_json(websocket, state_payload())
-        return
-
-    if command == "toggle_servo":
-        await toggle_servo(websocket, data)
-        return
-
-    if command == "open_servo":
-        await set_servos(websocket, data, "open")
-        return
-
-    if command == "close_servo":
-        await set_servos(websocket, data, "closed")
-        return
-
-    await send_error(websocket, "unknown_command")
+    response = await handle_request_payload(websocket, payload)
+    if response is not None:
+        await send_json(websocket, response)
 
 
 async def handler(websocket: Any, _path: str | None = None) -> None:
     clients.add(websocket)
     client_send_locks[websocket] = asyncio.Lock()
 
-    await send_json(websocket, state_payload())
-
     try:
         async for message in websocket:
             if not isinstance(message, str):
-                await send_error(websocket, "invalid_message_type")
+                await send_json(
+                    websocket,
+                    err(None, INVALID_REQUEST, "WebSocket messages must be text"),
+                )
                 continue
 
             await handle_message(websocket, message)
@@ -182,4 +360,8 @@ async def main() -> None:
     except asyncio.CancelledError:
         logging.info("server cancelled")
     finally:
+        for task in tuple(transition_tasks):
+            task.cancel()
+
+        await asyncio.gather(*transition_tasks, return_exceptions=True)
         servo_controller.close()

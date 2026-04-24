@@ -19,7 +19,7 @@ export function StatusBadge() {
     case ConnectionStatus.CONNECTING:
       badgeContent = <StatusBadgeConnecting />;
       break;
-    case ConnectionStatus.OPEN:
+    case ConnectionStatus.CONNECTED:
       badgeContent = <StatusBadgeConnected />;
       break;
     case ConnectionStatus.CLOSED:
@@ -34,7 +34,7 @@ export function StatusBadge() {
       <Badge variant="secondary" className="border-r-0">
         Status
       </Badge>
-      <Badge variant="default">{badgeContent}</Badge>
+      {badgeContent}
     </div>
   );
 }

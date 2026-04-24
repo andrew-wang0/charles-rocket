@@ -3,13 +3,20 @@
 import { createClient } from "@danscan/zod-jsonrpc";
 
 import { router } from "@/client/router";
+import {
+  servoControlResult,
+  type ServoSnapshot,
+  servoSnapshot,
+  servoStateNotification,
+} from "@/client/router/control/servo";
 import { env } from "@/env";
+import { useStore } from "@/lib/store";
 
 export enum ConnectionStatus {
   CONNECTING = "CONNECTING",
   CLOSED = "CLOSED",
   ERROR = "ERROR",
-  OPEN = "OPEN",
+  CONNECTED = "CONNECTED",
 }
 
 let ws: WebSocket | null = null;
@@ -31,6 +38,77 @@ function setState(next: Partial<{ status: ConnectionStatus }>) {
   emit();
 }
 
+function applyServoSnapshot(snapshot: ServoSnapshot) {
+  useStore.getState().syncServoStates(snapshot.states);
+}
+
+function rejectPending(reason: Error) {
+  pending.forEach(({ reject }) => reject(reason));
+  pending.clear();
+}
+
+function isObjectMessage(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function handleNotification(message: unknown) {
+  const parsed = servoStateNotification.safeParse(message);
+  if (!parsed.success) return false;
+
+  applyServoSnapshot(parsed.data.params);
+  return true;
+}
+
+function handleResponse(message: unknown) {
+  if (!isObjectMessage(message)) return false;
+
+  const { id } = message;
+  if (typeof id !== "string" && typeof id !== "number") return false;
+
+  const entry = pending.get(String(id));
+  if (!entry) return false;
+
+  pending.delete(String(id));
+
+  if ("error" in message && message.error !== undefined) {
+    entry.reject(message.error);
+  } else {
+    const servoControlResponse = servoControlResult.safeParse(message.result);
+    if (servoControlResponse.success) {
+      applyServoSnapshot({ states: servoControlResponse.data.states });
+    } else {
+      const servoStateResponse = servoSnapshot.safeParse(message.result);
+      if (servoStateResponse.success) {
+        applyServoSnapshot(servoStateResponse.data);
+      }
+    }
+
+    entry.resolve(message);
+  }
+
+  return true;
+}
+
+function handleMessage(message: unknown) {
+  if (Array.isArray(message)) {
+    message.forEach((entry) => {
+      if (!handleNotification(entry)) {
+        handleResponse(entry);
+      }
+    });
+    return;
+  }
+
+  if (handleNotification(message)) return;
+
+  handleResponse(message);
+}
+
+async function syncServoState() {
+  const snapshot = await client.servoState(undefined);
+  applyServoSnapshot(snapshot);
+}
+
 export function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
@@ -41,32 +119,28 @@ export function connect() {
   ws = new WebSocket(env.NEXT_PUBLIC_WS_URL);
 
   ws.addEventListener("open", () => {
-    setState({ status: ConnectionStatus.OPEN });
+    setState({ status: ConnectionStatus.CONNECTED });
+    void syncServoState().catch(() => {
+      ws?.close();
+    });
   });
 
   ws.addEventListener("close", () => {
+    rejectPending(new Error("WebSocket closed"));
     setState({ status: ConnectionStatus.CLOSED });
     ws = null;
   });
 
   ws.addEventListener("error", () => {
+    rejectPending(new Error("WebSocket error"));
     setState({ status: ConnectionStatus.ERROR });
   });
 
   ws.addEventListener("message", (event) => {
-    const msg = JSON.parse(String(event.data));
-
-    if (typeof msg?.id !== "number") return;
-
-    const entry = pending.get(msg.id);
-    if (!entry) return;
-
-    pending.delete(msg.id);
-
-    if (msg.error) {
-      entry.reject(msg.error);
-    } else {
-      entry.resolve(msg);
+    try {
+      handleMessage(JSON.parse(String(event.data)));
+    } catch {
+      // Ignore malformed websocket payloads.
     }
   });
 }
@@ -80,20 +154,29 @@ const pending = new Map<
 >();
 
 export const client = createClient(router, async (request) => {
+  if (Array.isArray(request)) {
+    throw new Error("Batch JSON-RPC requests are not supported by this transport");
+  }
+
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     throw new Error("WebSocket is not connected");
   }
 
-  const id = crypto.randomUUID();
-  const payload = { ...request, id, jsonrpc: "2.0" };
+  const { id } = request;
+
+  if (typeof id !== "string" && typeof id !== "number") {
+    ws.send(JSON.stringify(request));
+    return null;
+  }
 
   return await new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    pending.set(String(id), { resolve, reject });
 
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      pending.delete(id);
+      pending.delete(String(id));
+      reject(new Error("WebSocket is not connected"));
     } else {
-      ws.send(JSON.stringify(payload));
+      ws.send(JSON.stringify(request));
     }
   });
 });

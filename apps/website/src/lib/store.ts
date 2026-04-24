@@ -22,8 +22,13 @@ type Store = {
 
   servoStates: ServoState[];
   setServoState: (index: number, state: ServoState) => void;
-  setServoStates: (states: Map<number, ServoState>) => void;
+  syncServoStates: (states: { index: number; state: ServoState }[]) => void;
+  resetServoStates: () => void;
 };
+
+function createInitialServoStates() {
+  return Array.from({ length: SERVO_COUNT }, () => ServoState.UNKNOWN);
+}
 
 export const useStore = create<Store>((set) => ({
   pressureReadings: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => []),
@@ -39,7 +44,7 @@ export const useStore = create<Store>((set) => ({
 
   setLoadReadings: (readings) => set({ loadReadings: readings }),
 
-  servoStates: Array.from({ length: SERVO_COUNT }, () => ServoState.UNKNOWN),
+  servoStates: createInitialServoStates(),
 
   setServoState: (index, servoState) =>
     set((state) => {
@@ -48,14 +53,16 @@ export const useStore = create<Store>((set) => ({
       return { servoStates };
     }),
 
-  setServoStates: (states) =>
-    set((state) => {
-      const servoStates = [...state.servoStates];
+  syncServoStates: (states) =>
+    set(() => {
+      const servoStates = createInitialServoStates();
 
-      states.forEach((servoState, index) => {
-        servoStates[index] = servoState;
+      states.forEach(({ index, state }) => {
+        servoStates[index - 1] = state;
       });
 
       return { servoStates };
     }),
+
+  resetServoStates: () => set({ servoStates: createInitialServoStates() }),
 }));
