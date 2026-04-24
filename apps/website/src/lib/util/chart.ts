@@ -9,6 +9,17 @@ export function formatChartValue(value: number | undefined) {
   return value.toFixed(2);
 }
 
+export function formatAxisTick(value: number) {
+  const rounded = Math.round(value * 10) / 10;
+  const normalized = Object.is(rounded, -0) ? 0 : rounded;
+
+  if (Number.isInteger(normalized)) {
+    return String(normalized);
+  }
+
+  return normalized.toFixed(1);
+}
+
 export function createTickValues(windowStart: number, latestTime: number) {
   const tickCount = CHART_WINDOW_MS / CHART_TICK_INTERVAL_MS;
 

@@ -6,14 +6,6 @@ import { client, ConnectionStatus } from "@/client";
 import { useConnectionStatus } from "@/hooks/use-connection-status";
 import { useStore } from "@/lib/store";
 
-const READINGS_POLL_DELAY_MS = 0;
-
-function delay(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 export function DataReader() {
   const appendLoadReadings = useStore((store) => store.appendLoadReadings);
   const status = useConnectionStatus();
@@ -45,8 +37,6 @@ export function DataReader() {
             appendLoadReadings(response.data.load);
             appendPressureReadings(response.data.pressure);
           }
-
-          await delay(READINGS_POLL_DELAY_MS);
         } catch {
           return;
         }

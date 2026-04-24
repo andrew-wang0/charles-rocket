@@ -15,6 +15,7 @@ import {
   bucketReadings,
   CHART_WINDOW_MS,
   createTickValues,
+  formatAxisTick,
   formatRelativeTick,
 } from "@/lib/util/chart";
 
@@ -85,7 +86,13 @@ export function PressureWidgetChart() {
         }}
       >
         <CartesianGrid vertical={false} />
-        <YAxis axisLine={false} tickLine={false} tickMargin={6} width={32} />
+        <YAxis
+          axisLine={false}
+          tickLine={false}
+          tickMargin={6}
+          width={32}
+          tickFormatter={(value) => formatAxisTick(Number(value))}
+        />
         <XAxis
           type="number"
           dataKey="time"

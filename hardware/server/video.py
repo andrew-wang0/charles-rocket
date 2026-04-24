@@ -71,7 +71,7 @@ async def camera_stream(_request: web.Request) -> web.StreamResponse:
     except (ConnectionResetError, BrokenPipeError):
         pass
     except Exception:
-        logger.exception("mjpeg stream failed")
+        logger.exception("video stream failed")
     finally:
         with contextlib.suppress(Exception):
             await response.write_eof()
