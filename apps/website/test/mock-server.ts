@@ -1,0 +1,288 @@
+import process from "node:process";
+
+import { type WebSocket, WebSocketServer } from "ws";
+
+import { PRESSURE_TRANSDUCER_COUNT, SERVO_COUNT } from "@/lib/constants";
+import { IgnitionState } from "@/types/ignition";
+import { ServoState } from "@/types/servo";
+
+const HISTORY_WINDOW_MS = 30_000;
+const RESPONSE_DELAY_MS = 20;
+const SAMPLE_INTERVAL_MS = 100;
+const DEFAULT_PORT = 8765;
+const DEFAULT_HOST = "0.0.0.0";
+
+type JsonRpcId = string | number | null;
+type TimedReading = {
+  time: number;
+  value: number;
+};
+
+type JsonRpcRequest = {
+  jsonrpc?: unknown;
+  method?: unknown;
+  params?: unknown;
+  id?: unknown;
+};
+
+const servoStates = Array.from({ length: SERVO_COUNT }, () => ServoState.CLOSED);
+let ignitionState = IgnitionState.OFF;
+const pressureBuffers: TimedReading[][] = Array.from(
+  { length: PRESSURE_TRANSDUCER_COUNT },
+  () => [],
+);
+const latestPressureValues = Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () =>
+  randomPressureValue(),
+);
+
+seedPressureHistory();
+
+const sampler = setInterval(() => {
+  appendPressureSample(Date.now());
+}, SAMPLE_INTERVAL_MS);
+
+const port = Number(process.env.MOCK_WS_PORT ?? DEFAULT_PORT);
+const host = process.env.MOCK_WS_HOST ?? DEFAULT_HOST;
+
+const wss = new WebSocketServer({ host, port });
+
+wss.on("connection", (socket) => {
+  socket.on("message", (raw) => {
+    void handleMessage(socket, raw.toString());
+  });
+});
+
+wss.on("listening", () => {
+  console.log(`mock websocket server listening on ws://${host}:${port}`);
+});
+
+wss.on("close", () => {
+  clearInterval(sampler);
+});
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
+async function handleMessage(socket: WebSocket, raw: string) {
+  let request: JsonRpcRequest;
+
+  try {
+    request = JSON.parse(raw) as JsonRpcRequest;
+  } catch {
+    await send(socket, errorResponse(null, -32700, "Parse error"));
+    return;
+  }
+
+  if (!isValidRequest(request)) {
+    await send(socket, errorResponse(extractId(request.id), -32600, "Invalid Request"));
+    return;
+  }
+
+  const id = extractId(request.id);
+  const isNotification = request.id === undefined;
+
+  try {
+    const response = handleMethod(request.method, request.params, id);
+    if (isNotification) return;
+
+    await send(socket, response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Server error";
+    await send(socket, errorResponse(id, -32000, message));
+  }
+}
+
+function handleMethod(method: string, params: unknown, id: JsonRpcId) {
+  switch (method) {
+    case "servoControl":
+      return okResponse(id, handleServoControl(params));
+    case "servoState":
+      return okResponse(id, servoSnapshot());
+    case "ignitionControl":
+      return okResponse(id, handleIgnitionControl(params));
+    case "readings":
+      return okResponse(id, handleReadings(params));
+    default:
+      return errorResponse(id, -32601, `Method not found: ${method}`);
+  }
+}
+
+function handleServoControl(params: unknown) {
+  const payload = asRecord(params);
+  const index = Number(payload.index);
+  const nextState = payload.set;
+
+  if (!Number.isInteger(index) || index < 1 || index > SERVO_COUNT) {
+    throw new Error("servoControl index must be a valid servo number");
+  }
+
+  if (nextState !== ServoState.OPEN && nextState !== ServoState.CLOSED) {
+    throw new Error("servoControl set must be OPEN or CLOSED");
+  }
+
+  servoStates[index - 1] = nextState;
+
+  return {
+    result: "success",
+    ...servoSnapshot(),
+  };
+}
+
+function handleIgnitionControl(params: unknown) {
+  const payload = asRecord(params);
+  const nextState = payload.set;
+
+  if (nextState !== IgnitionState.ON && nextState !== IgnitionState.OFF) {
+    throw new Error("ignitionControl set must be ON or OFF");
+  }
+
+  ignitionState = nextState;
+
+  return {
+    result: "success",
+    state: ignitionState,
+  };
+}
+
+function handleReadings(params: unknown) {
+  const payload = params === undefined ? {} : asRecord(params);
+  const includeHistory = payload.history === true;
+
+  return {
+    status: {
+      servoControllerOk: true,
+      pressureSensorsOk: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => true),
+      loadSensorOk: false,
+    },
+    data: {
+      load: [],
+      pressure: includeHistory ? pressureHistory() : latestPressurePayload(),
+    },
+  };
+}
+
+function servoSnapshot() {
+  return {
+    states: servoStates.map((state, index) => ({
+      index: index + 1,
+      state,
+    })),
+  };
+}
+
+function latestPressurePayload() {
+  return pressureBuffers.map((buffer) => {
+    const latest = buffer.at(-1);
+    return latest ? [latest] : [];
+  });
+}
+
+function pressureHistory() {
+  return pressureBuffers.map((buffer) => [...buffer]);
+}
+
+function appendPressureSample(now: number) {
+  for (let index = 0; index < PRESSURE_TRANSDUCER_COUNT; index += 1) {
+    latestPressureValues[index] = nextPressureValue(latestPressureValues[index]);
+    pressureBuffers[index].push({
+      time: now,
+      value: latestPressureValues[index],
+    });
+    trimPressureBuffer(pressureBuffers[index], now);
+  }
+}
+
+function trimPressureBuffer(buffer: TimedReading[], now: number) {
+  const cutoff = now - HISTORY_WINDOW_MS;
+
+  while ((buffer[0]?.time ?? Number.POSITIVE_INFINITY) < cutoff) {
+    buffer.shift();
+  }
+}
+
+function seedPressureHistory() {
+  const now = Date.now();
+
+  for (
+    let timestamp = now - HISTORY_WINDOW_MS + SAMPLE_INTERVAL_MS;
+    timestamp <= now;
+    timestamp += SAMPLE_INTERVAL_MS
+  ) {
+    appendPressureSample(timestamp);
+  }
+}
+
+function nextPressureValue(previous: number) {
+  const delta = (Math.random() - 0.5) * 50;
+  return clamp(previous + delta, 0, 500);
+}
+
+function randomPressureValue() {
+  return Math.random() * 500;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function isValidRequest(value: JsonRpcRequest): value is {
+  jsonrpc: "2.0";
+  method: string;
+  params?: unknown;
+  id?: string | number | null;
+} {
+  return value.jsonrpc === "2.0" && typeof value.method === "string";
+}
+
+function extractId(id: unknown): JsonRpcId {
+  if (typeof id === "string" || typeof id === "number" || id === null) {
+    return id;
+  }
+
+  return null;
+}
+
+function asRecord(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("params must be an object");
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function okResponse(id: JsonRpcId, result: unknown) {
+  return {
+    jsonrpc: "2.0" as const,
+    id,
+    result,
+  };
+}
+
+function errorResponse(id: JsonRpcId, code: number, message: string) {
+  return {
+    jsonrpc: "2.0" as const,
+    id,
+    error: {
+      code,
+      message,
+    },
+  };
+}
+
+async function send(socket: WebSocket, payload: unknown) {
+  await delay(RESPONSE_DELAY_MS);
+
+  if (socket.readyState !== socket.OPEN) return;
+  socket.send(JSON.stringify(payload));
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function shutdown() {
+  clearInterval(sampler);
+  wss.close();
+}

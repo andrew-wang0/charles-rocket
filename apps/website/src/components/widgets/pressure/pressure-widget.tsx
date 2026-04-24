@@ -2,102 +2,40 @@
 
 import React from "react";
 
-import { client, ConnectionStatus } from "@/client";
-import { useConnectionStatus } from "@/hooks/use-connection-status";
-import { PRESSURE_TRANSDUCER_COUNT } from "@/lib/constants";
+import {
+  chartConfig,
+  formatPsi,
+  PressureWidgetChart,
+} from "@/components/widgets/pressure/pressure-widget-chart";
 import { useStore } from "@/lib/store";
 
-const POLL_INTERVAL_MS = 1000 / 60;
-
-function formatPsi(value: number | undefined) {
-  if (value === undefined) return "--";
-  return value.toFixed(2);
-}
-
 export function PressureWidget() {
-  const status = useConnectionStatus();
   const pressureReadings = useStore((store) => store.pressureReadings);
-  const appendPressureReadings = useStore((store) => store.appendPressureReadings);
-  const setPressureWindows = useStore((store) => store.setPressureWindows);
-  const setLoadReadings = useStore((store) => store.setLoadReadings);
-  const cancelledRef = React.useRef(false);
-  const inFlightRef = React.useRef(false);
-  const timerRef = React.useRef<number>(0);
-
-  React.useEffect(() => {
-    if (status !== ConnectionStatus.CONNECTED) return;
-
-    cancelledRef.current = false;
-    inFlightRef.current = false;
-    timerRef.current = 0;
-    const isCancelled = () => cancelledRef.current;
-
-    const scheduleNextTick = () => {
-      timerRef.current = window.setTimeout(() => {
-        void tick();
-      }, POLL_INTERVAL_MS);
-    };
-
-    const tick = async () => {
-      if (isCancelled()) return;
-
-      if (inFlightRef.current) {
-        scheduleNextTick();
-        return;
-      }
-
-      inFlightRef.current = true;
-
-      try {
-        const response = await client.readings({});
-        appendPressureReadings(response.data.pressure);
-        setLoadReadings(response.data.load);
-      } catch {
-        // Connection state already represents transport failures.
-      } finally {
-        inFlightRef.current = false;
-      }
-
-      if (isCancelled()) return;
-
-      scheduleNextTick();
-    };
-
-    void (async () => {
-      try {
-        const response = await client.readings({ history: true });
-
-        if (isCancelled()) return;
-
-        setPressureWindows(response.data.pressure);
-        setLoadReadings(response.data.load);
-      } catch {
-        // Connection state already represents transport failures.
-      }
-
-      if (isCancelled()) return;
-
-      void tick();
-    })();
-
-    return () => {
-      cancelledRef.current = true;
-      window.clearTimeout(timerRef.current);
-    };
-  }, [appendPressureReadings, setLoadReadings, setPressureWindows, status]);
 
   return (
-    <div className="grid gap-2 font-mono text-sm">
-      {Array.from({ length: PRESSURE_TRANSDUCER_COUNT }).map((_, index) => {
-        const latest = pressureReadings[index]?.at(-1)?.value;
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+      <div className="grid shrink-0 gap-2 md:grid-cols-3">
+        {Object.entries(chartConfig).map(([_, { label, color }], index) => {
+          const latest = pressureReadings[index]?.at(-1)?.value;
 
-        return (
-          <div key={index} className="flex items-center justify-between border p-2">
-            <span>PT {index + 1}</span>
-            <span>{formatPsi(latest)} PSI</span>
-          </div>
-        );
-      })}
+          return (
+            <div key={index} className="border border-b-4 p-2" style={{ borderBottomColor: color }}>
+              <div className="text-muted-foreground flex items-center justify-between text-[11px]">
+                <span>{label}</span>
+              </div>
+              <div className="mt-1 font-mono text-lg tabular-nums">{formatPsi(latest)} PSI</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {pressureReadings.length === 0 ? (
+        <div className="text-muted-foreground flex min-h-0 flex-1 items-center justify-center border text-sm">
+          AWAITING DATA
+        </div>
+      ) : (
+        <PressureWidgetChart />
+      )}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { WidgetCard } from "@/components/widgets/widget-card";
 
 export default function Page() {
   return (
-    <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-2 gap-2 p-4 pt-2">
+    <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-2 gap-2 overflow-hidden p-4 pt-2">
       <ControlWidget />
       <WidgetCard size="sm">
         <CardHeader>
@@ -21,7 +21,7 @@ export default function Page() {
         <CardHeader>
           <CardTitle>PT Monitor</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex min-h-0 flex-1 overflow-hidden">
           <PressureWidget />
         </CardContent>
       </WidgetCard>

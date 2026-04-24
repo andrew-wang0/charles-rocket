@@ -11,8 +11,14 @@ export const timedReadings = z
   })
   .array();
 
-type TimedReadings = z.infer<typeof timedReadings>;
+export type TimedReadings = z.infer<typeof timedReadings>;
 const PRESSURE_WINDOW_MS = 30_000;
+
+export type ReadingsStatus = {
+  servoControllerOk: boolean;
+  pressureSensorsOk: boolean[];
+  loadSensorOk: boolean;
+};
 
 type Store = {
   pressureReadings: TimedReadings[];
@@ -22,6 +28,9 @@ type Store = {
 
   loadReadings: TimedReadings;
   setLoadReadings: (readings: TimedReadings) => void;
+
+  readingsStatus: ReadingsStatus;
+  setReadingsStatus: (status: ReadingsStatus) => void;
 
   servoStates: ServoState[];
   setServoState: (index: number, state: ServoState) => void;
@@ -51,7 +60,11 @@ export const useStore = create<Store>((set) => ({
         const incoming = readings[index] ?? [];
         if (incoming.length === 0) return existing;
 
-        const merged = [...existing, ...incoming];
+        const lastTime = existing.at(-1)?.time ?? -1;
+        const next = incoming.filter((reading) => reading.time > lastTime);
+        if (next.length === 0) return existing;
+
+        const merged = [...existing, ...next];
         const cutoff = (merged.at(-1)?.time ?? 0) - PRESSURE_WINDOW_MS;
         return merged.filter((reading) => reading.time >= cutoff);
       });
@@ -62,6 +75,14 @@ export const useStore = create<Store>((set) => ({
   loadReadings: [],
 
   setLoadReadings: (readings) => set({ loadReadings: readings }),
+
+  readingsStatus: {
+    servoControllerOk: false,
+    pressureSensorsOk: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => false),
+    loadSensorOk: false,
+  },
+
+  setReadingsStatus: (readingsStatus) => set({ readingsStatus }),
 
   servoStates: createInitialServoStates(),
 

@@ -17,7 +17,11 @@ export function WidgetCard({ children, className, ...props }: Props) {
   return (
     <Card
       aria-disabled={!isOpen}
-      className={cn("relative", !isOpen && "pointer-events-none grayscale select-none", className)}
+      className={cn(
+        "relative min-h-0",
+        !isOpen && "pointer-events-none grayscale select-none",
+        className,
+      )}
       {...props}
     >
       {children}

@@ -1,6 +1,5 @@
 "use client";
 
-import { ArrowRightIcon } from "@phosphor-icons/react";
 import React from "react";
 
 import { ServoManualControlUnit } from "@/components/widgets/control/servo-manual-control-unit";
@@ -14,7 +13,6 @@ export function ServoManualControl({ className, ...props }: Props) {
     <div className={cn("flex items-center justify-around", className)} {...props}>
       {Array.from({ length: SERVO_COUNT }).map((_, index) => (
         <React.Fragment key={index}>
-          {index > 0 ? <ArrowRightIcon weight="bold" /> : null}
           <ServoManualControlUnit index={index} />
         </React.Fragment>
       ))}

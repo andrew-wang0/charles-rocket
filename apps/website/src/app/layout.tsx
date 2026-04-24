@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import React from "react";
 
+import { DataReader } from "@/components/layout/data-reader";
 import { Header } from "@/components/layout/header/header";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +21,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn("font-mono", jetbrainsMono.variable)}>
-      <body className={cn(jetbrainsMono.className, "flex min-h-dvh flex-col")}>
+      <body className={cn(jetbrainsMono.className, "flex h-dvh flex-col overflow-hidden")}>
+        <DataReader />
         <Header />
         {children}
       </body>
