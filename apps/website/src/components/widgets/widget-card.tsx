@@ -1,26 +1,27 @@
 "use client";
 
 import React from "react";
-import { ReadyState } from "react-use-websocket";
 
+import { ConnectionStatus } from "@/client";
 import { Card } from "@/components/ui/card";
-import { useAppWebSocket } from "@/hooks/use-websocket";
+import { useConnectionStatus } from "@/hooks/use-connection-status";
 import { cn } from "@/lib/utils";
 
 type Props = React.ComponentProps<typeof Card>;
 
 export function WidgetCard({ children, className, ...props }: Props) {
-  const websocket = useAppWebSocket();
-  const isDisconnected = websocket.readyState !== ReadyState.OPEN;
+  const status = useConnectionStatus();
+
+  const isOpen = status === ConnectionStatus.OPEN;
 
   return (
     <Card
-      aria-disabled={isDisconnected}
-      className={cn("relative", isDisconnected && "pointer-events-none select-none", className)}
+      aria-disabled={!isOpen}
+      className={cn("relative", !isOpen && "pointer-events-none select-none", className)}
       {...props}
     >
       {children}
-      {isDisconnected ? (
+      {!isOpen ? (
         <div
           aria-hidden="true"
           className={cn(

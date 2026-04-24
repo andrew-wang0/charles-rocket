@@ -1,29 +1,28 @@
 "use client";
 
 import React from "react";
-import { ReadyState } from "react-use-websocket";
 
+import { ConnectionStatus } from "@/client";
 import { StatusBadgeClosed } from "@/components/layout/header/status-badge/status-badge-closed";
 import { StatusBadgeConnected } from "@/components/layout/header/status-badge/status-badge-connected";
 import { StatusBadgeConnecting } from "@/components/layout/header/status-badge/status-badge-connecting";
 import { StatusBadgeUnknown } from "@/components/layout/header/status-badge/status-badge-unknown";
 import { Badge } from "@/components/ui/badge";
-import { useAppWebSocket } from "@/hooks/use-websocket";
+import { useConnectionStatus } from "@/hooks/use-connection-status";
 
 export function StatusBadge() {
-  const websocket = useAppWebSocket();
+  const status = useConnectionStatus();
 
   let badgeContent: React.ReactNode;
 
-  switch (websocket.readyState) {
-    case ReadyState.CONNECTING:
+  switch (status) {
+    case ConnectionStatus.CONNECTING:
       badgeContent = <StatusBadgeConnecting />;
       break;
-    case ReadyState.OPEN:
+    case ConnectionStatus.OPEN:
       badgeContent = <StatusBadgeConnected />;
       break;
-    case ReadyState.CLOSING:
-    case ReadyState.CLOSED:
+    case ConnectionStatus.CLOSED:
       badgeContent = <StatusBadgeClosed />;
       break;
     default:

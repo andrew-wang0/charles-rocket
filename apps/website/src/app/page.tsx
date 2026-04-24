@@ -1,13 +1,13 @@
 import React from "react";
 
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ServoWidget } from "@/components/widgets/servo-widget/servo-widget";
+import { ControlWidget } from "@/components/widgets/control/control-widget";
 import { WidgetCard } from "@/components/widgets/widget-card";
 
 export default function Page() {
   return (
     <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-2 gap-2 p-4 pt-2">
-      <ServoWidget />
+      <ControlWidget />
       <WidgetCard size="sm">
         <CardHeader>
           <CardTitle>Video Feed</CardTitle>

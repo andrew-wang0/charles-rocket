@@ -3,43 +3,35 @@
 import React from "react";
 
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
+import { useServo } from "@/hooks/use-servo";
 import { cn } from "@/lib/utils";
-import type { ServoChannel, ServoChannelState } from "@/types/websocket";
-import { ServoStatus } from "@/types/websocket";
+import { ServoState } from "@/types/servo";
 
 type Props = {
-  canSendCommands: boolean;
-  servo: ServoChannelState;
-  onSwitch: (channel: ServoChannel) => void;
+  index: number;
 } & React.ComponentProps<"div">;
 
-function getStatusClassName(state: ServoStatus) {
+function getStatusClassName(state: ServoState) {
   switch (state) {
-    case ServoStatus.OPEN:
+    case ServoState.OPEN:
       return "bg-positive/20 text-positive border-positive/40";
-    case ServoStatus.CLOSED:
+    case ServoState.CLOSED:
       return "bg-destructive/10 text-destructive border-destructive/30";
-    case ServoStatus.OPENING:
+    case ServoState.OPENING:
       return "bg-positive/20 text-positive border-positive/40 animate-pulse animation-duration-[250ms]";
-    case ServoStatus.CLOSING:
+    case ServoState.CLOSING:
       return "bg-destructive/20 text-destructive border-destructive/40 animate-pulse animation-duration-[250ms]";
     default:
       return "bg-muted text-muted-foreground border-border";
   }
 }
 
-export function ServoManualControlUnit({
-  canSendCommands,
-  servo,
-  onSwitch,
-  className,
-  ...props
-}: Props) {
-  const isSwitching = servo.state === "opening" || servo.state === "closing";
+export function ServoManualControlUnit({ index, className, ...props }: Props) {
+  const servo = useServo(index);
 
   return (
     <div className={cn("flex h-full flex-col items-center justify-between", className)} {...props}>
-      <p className="h-8">SERVO {servo.channel + 1}</p>
+      <p className="h-8">SERVO {index + 1}</p>
       <div
         className={cn(
           "flex size-16 items-center justify-center rounded-full border text-[0.65rem] font-medium capitalize",
@@ -49,8 +41,10 @@ export function ServoManualControlUnit({
         <span>{servo.state}</span>
       </div>
       <WidgetLockableButton
-        disabled={!canSendCommands || isSwitching}
-        onClick={() => onSwitch(servo.channel)}
+        disabled={servo.isSwitching}
+        onClick={() => {
+          /* TODO */
+        }}
       >
         SWITCH
       </WidgetLockableButton>
