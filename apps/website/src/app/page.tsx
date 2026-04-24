@@ -1,39 +1,17 @@
 import React from "react";
 
-import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ControlWidget } from "@/components/widgets/control/control-widget";
 import { LoadWidget } from "@/components/widgets/load/load-widget";
 import { PressureWidget } from "@/components/widgets/pressure/pressure-widget";
-import { WidgetCard } from "@/components/widgets/widget-card";
+import { VideoWidget } from "@/components/widgets/video/video-widget";
 
 export default function Page() {
   return (
     <div className="grid min-h-0 flex-1 auto-rows-fr grid-cols-2 gap-2 overflow-hidden p-4 pt-2">
       <ControlWidget />
-      <WidgetCard size="sm">
-        <CardHeader>
-          <CardTitle>Video Feed</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-1">
-          <div className="bg-muted flex-1 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,var(--border)_10px,var(--border)_11px)]" />
-        </CardContent>
-      </WidgetCard>
-      <WidgetCard size="sm">
-        <CardHeader>
-          <CardTitle>PT Monitor</CardTitle>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 overflow-hidden">
-          <PressureWidget />
-        </CardContent>
-      </WidgetCard>
-      <WidgetCard size="sm">
-        <CardHeader>
-          <CardTitle>Load Monitor</CardTitle>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 overflow-hidden">
-          <LoadWidget />
-        </CardContent>
-      </WidgetCard>
+      <VideoWidget />
+      <PressureWidget />
+      <LoadWidget />
     </div>
   );
 }

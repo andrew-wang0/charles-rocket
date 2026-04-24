@@ -8,10 +8,10 @@ from typing import Any, cast
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from .constants import HOST, PORT, SERVO_CHANNELS
-from .controllers import ServoController, ServoStableState
-from .load import LoadSampler
-from .pressure import PressureSampler
+from calibration import CalibrationSet
+from config import HOST, PORT, SERVO_CHANNELS
+from control.servo import ServoController, ServoStableState
+from read import LoadSampler, PressureSampler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,13 +33,43 @@ SERVO_INDEX_BY_CHANNEL = {
     channel: index for index, channel in SERVO_CHANNEL_BY_INDEX.items()
 }
 
-servo_controller = ServoController()
-pressure_sampler = PressureSampler()
-load_sampler = LoadSampler()
+servo_controller: ServoController | None = None
+pressure_sampler: PressureSampler | None = None
+load_sampler: LoadSampler | None = None
 ignition_state = "UNKNOWN"
 clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
 transition_tasks: set[asyncio.Task[None]] = set()
+
+
+def initialize_runtime(calibration_set: CalibrationSet) -> None:
+    global servo_controller, pressure_sampler, load_sampler, ignition_state
+
+    servo_controller = ServoController(calibration_set.servo)
+    pressure_sampler = PressureSampler(calibration_set.pressure)
+    load_sampler = LoadSampler(calibration_set.load)
+    ignition_state = "UNKNOWN"
+
+
+def get_servo_controller() -> ServoController:
+    if servo_controller is None:
+        raise RuntimeError("servo controller not initialized")
+
+    return servo_controller
+
+
+def get_pressure_sampler() -> PressureSampler:
+    if pressure_sampler is None:
+        raise RuntimeError("pressure sampler not initialized")
+
+    return pressure_sampler
+
+
+def get_load_sampler() -> LoadSampler:
+    if load_sampler is None:
+        raise RuntimeError("load sampler not initialized")
+
+    return load_sampler
 
 
 def ok(request_id: Any, result: Any) -> dict[str, Any]:
@@ -81,7 +111,7 @@ def notify(method: str, params: Any) -> dict[str, Any]:
 
 def build_servo_snapshot() -> dict[str, list[dict[str, Any]]]:
     channels = sorted(
-        servo_controller.state_payload()["channels"],
+        get_servo_controller().state_payload()["channels"],
         key=lambda channel_state: SERVO_INDEX_BY_CHANNEL[channel_state["channel"]],
     )
 
@@ -97,22 +127,26 @@ def build_servo_snapshot() -> dict[str, list[dict[str, Any]]]:
 
 
 def build_readings_result(include_history: bool = False) -> dict[str, Any]:
+    servo = get_servo_controller()
+    pressure = get_pressure_sampler()
+    load = get_load_sampler()
+
     return {
         "status": {
-            "servoControllerOk": servo_controller.available,
-            "pressureSensorsOk": pressure_sampler.status_payload(),
-            "loadSensorOk": load_sampler.status_payload(),
+            "servoControllerOk": servo.available,
+            "pressureSensorsOk": pressure.status_payload(),
+            "loadSensorOk": load.status_payload(),
         },
         "data": {
             "load": (
-                load_sampler.history_payload()
+                load.history_payload()
                 if include_history
-                else load_sampler.latest_payload()
+                else load.latest_payload()
             ),
             "pressure": (
-                pressure_sampler.history_payload()
+                pressure.history_payload()
                 if include_history
-                else pressure_sampler.latest_payload()
+                else pressure.latest_payload()
             ),
         },
     }
@@ -176,7 +210,7 @@ async def finish_servo_transition(
     target_state: ServoStableState,
 ) -> None:
     try:
-        await servo_controller.finish_transitions(channels, target_state)
+        await get_servo_controller().finish_transitions(channels, target_state)
         await broadcast_servo_state()
     except Exception:
         logging.exception(
@@ -220,7 +254,7 @@ async def handle_servo_control(
         raise ValueError("Invalid params") from exc
 
     try:
-        transitioned_channels = await servo_controller.set_servo(channel, target_state)
+        transitioned_channels = await get_servo_controller().set_servo(channel, target_state)
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
 
@@ -363,10 +397,11 @@ async def handler(websocket: Any, _path: str | None = None) -> None:
         client_send_locks.pop(websocket, None)
 
 
-async def main() -> None:
+async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
     logging.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
-    pressure_sampler.start()
-    load_sampler.start()
+    initialize_runtime(calibration_set)
+    get_pressure_sampler().start()
+    get_load_sampler().start()
 
     try:
         async with websockets.serve(handler, HOST, PORT):
@@ -378,6 +413,9 @@ async def main() -> None:
             task.cancel()
 
         await asyncio.gather(*transition_tasks, return_exceptions=True)
-        load_sampler.stop()
-        pressure_sampler.stop()
-        servo_controller.close()
+        if load_sampler is not None:
+            load_sampler.stop()
+        if pressure_sampler is not None:
+            pressure_sampler.stop()
+        if servo_controller is not None:
+            servo_controller.close()

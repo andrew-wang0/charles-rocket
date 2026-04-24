@@ -6,9 +6,10 @@ import importlib
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, Sequence, TypedDict
 
-from .constants import (
+from calibration import ServoCalibrationEntry
+from config import (
     PCA9685_I2C_ADDRESS,
     PCA9685_PWM_FREQUENCY,
     SERVO_ACTUATION_RANGE,
@@ -35,7 +36,7 @@ class ServoChannelState(TypedDict):
 
 
 class ServoController:
-    def __init__(self) -> None:
+    def __init__(self, calibration: Sequence[ServoCalibrationEntry] | None = None) -> None:
         self._lock = asyncio.Lock()
         self.available = False
         self.error: str | None = None
@@ -43,6 +44,14 @@ class ServoController:
         self._servos: dict[int, Any] = {}
         self._angles: dict[int, float | None] = {channel: None for channel in SERVO_CHANNELS}
         self._states: dict[int, ServoState] = {channel: "unknown" for channel in SERVO_CHANNELS}
+        self._open_angles = {
+            channel: (calibration[index].open if calibration else SERVO_OPEN_ANGLE)
+            for index, channel in enumerate(SERVO_CHANNELS)
+        }
+        self._close_angles = {
+            channel: (calibration[index].close if calibration else SERVO_CLOSED_ANGLE)
+            for index, channel in enumerate(SERVO_CHANNELS)
+        }
 
         try:
             self._add_raspberry_pi_system_packages()
@@ -114,11 +123,11 @@ class ServoController:
     def _target_state_for_toggle(self, channel: int) -> ServoStableState:
         return "closed" if self._states[channel] == "open" else "open"
 
-    def _target_angle(self, target_state: ServoStableState) -> float:
-        return SERVO_OPEN_ANGLE if target_state == "open" else SERVO_CLOSED_ANGLE
+    def _target_angle(self, channel: int, target_state: ServoStableState) -> float:
+        return self._open_angles[channel] if target_state == "open" else self._close_angles[channel]
 
     def _set_angle_sync(self, channel: int, target_state: ServoStableState) -> None:
-        angle = self._target_angle(target_state)
+        angle = self._target_angle(channel, target_state)
         self._servos[channel].angle = angle
         self._angles[channel] = angle
         logger.info("servo angle set: channel=%s target=%s angle=%s", channel, target_state, angle)

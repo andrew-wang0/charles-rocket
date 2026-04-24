@@ -1,6 +1,8 @@
+aiohttp
 adafruit-blinka
 adafruit-circuitpython-ads1x15
+adafruit-circuitpython-hx711
 adafruit-circuitpython-motor
 adafruit-circuitpython-pca9685
-hx711-rpi-py
+opencv-python-headless
 websockets

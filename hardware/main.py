@@ -1,6 +1,6 @@
 import asyncio
 
-from control.server import main
+from server import main
 
 
 if __name__ == "__main__":

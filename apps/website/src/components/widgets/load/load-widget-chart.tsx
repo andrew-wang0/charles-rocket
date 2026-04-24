@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { CartesianGrid, Line, LineChart, XAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 import type { ChartConfig } from "@/components/ui/chart";
 import {
@@ -59,11 +59,12 @@ export function LoadWidgetChart() {
         accessibilityLayer
         data={chartData}
         margin={{
-          left: 18,
+          left: 4,
           right: 10,
         }}
       >
         <CartesianGrid vertical={false} />
+        <YAxis axisLine={false} tickLine={false} tickMargin={6} width={32} />
         <XAxis
           type="number"
           dataKey="time"

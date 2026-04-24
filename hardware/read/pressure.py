@@ -8,9 +8,10 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Sequence, TextIO
 
-from .constants import (
+from calibration import PressureCalibrationEntry
+from config import (
     ADS1115_DATA_RATE,
     ADS1115_GAIN,
     ADS1115_I2C_ADDRESS,
@@ -31,7 +32,7 @@ TRANSPORT_BUFFER_MAXLEN = PRESSURE_TRANSPORT_WINDOW_SECONDS * PRESSURE_TRANSPORT
 
 
 class PressureSampler:
-    def __init__(self) -> None:
+    def __init__(self, calibration: Sequence[PressureCalibrationEntry] | None = None) -> None:
         self.available = False
         self.error: str | None = None
 
@@ -48,6 +49,10 @@ class PressureSampler:
         ]
         self._transport_buffers = [
             deque(maxlen=TRANSPORT_BUFFER_MAXLEN) for _ in range(PRESSURE_TRANSDUCER_COUNT)
+        ]
+        self._zero_offsets = [
+            calibration[index].zero if calibration else 0.0
+            for index in range(PRESSURE_TRANSDUCER_COUNT)
         ]
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "pressure-transducers"
         self._file_handles: list[TextIO] = []
@@ -161,7 +166,7 @@ class PressureSampler:
             try:
                 voltage = self._read_voltage(channel_index)
                 timestamp_ms = int(time.time() * 1000)
-                psi = self._voltage_to_psi(voltage)
+                psi = self._voltage_to_psi(voltage, channel_index)
                 self._record_sample(channel_index, timestamp_ms, psi, voltage)
                 channel_index = (channel_index + 1) % PRESSURE_TRANSDUCER_COUNT
             except Exception:
@@ -173,8 +178,9 @@ class PressureSampler:
     def _read_voltage(self, channel_index: int) -> float:
         return float(self._channels[channel_index].voltage)
 
-    def _voltage_to_psi(self, voltage: float) -> float:
+    def _voltage_to_psi(self, voltage: float, channel_index: int) -> float:
         psi = (voltage / PRESSURE_TRANSDUCER_MAX_VOLTAGE) * PRESSURE_TRANSDUCER_MAX_PSI
+        psi -= self._zero_offsets[channel_index]
         return max(0.0, min(PRESSURE_TRANSDUCER_MAX_PSI, psi))
 
     def _record_sample(

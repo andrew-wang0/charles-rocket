@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import importlib
-import json
 import logging
 import sys
 import threading
@@ -11,7 +10,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any, TextIO
 
-from .constants import (
+from calibration import LoadCalibrationEntry
+from config import (
     LOAD_CELL_CLOCK_PIN,
     LOAD_CELL_DATA_PIN,
     LOAD_CELL_OFFSET,
@@ -25,7 +25,7 @@ RASPBERRY_PI_SYSTEM_PACKAGES = Path("/usr/lib/python3/dist-packages")
 
 
 class LoadSampler:
-    def __init__(self) -> None:
+    def __init__(self, calibration: LoadCalibrationEntry | None = None) -> None:
         self.available = False
         self.error: str | None = None
 
@@ -33,35 +33,40 @@ class LoadSampler:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._hx: Any | None = None
+        self._channel: Any | None = None
+        self._data_pin: Any | None = None
+        self._clock_pin: Any | None = None
         self._sensor_ok = False
         self._buffer: deque[tuple[int, float]] = deque()
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "load-cell"
         self._data_file: TextIO | None = None
-        self._calibration_path = (
-            Path(__file__).resolve().parent / "calibration" / "load_cell_calibration.json"
-        )
-        self._reference_unit, self._offset = self._load_calibration()
+        self._reference_unit = calibration.reference_unit if calibration else LOAD_CELL_REFERENCE_UNIT
+        self._zero = calibration.zero if calibration else LOAD_CELL_OFFSET
 
         try:
             self._add_raspberry_pi_system_packages()
 
-            hx711_module = importlib.import_module("HX711")
+            board = importlib.import_module("board")
+            digitalio = importlib.import_module("digitalio")
+            hx711_module = importlib.import_module("adafruit_hx711.hx711")
+            analog_in_module = importlib.import_module("adafruit_hx711.analog_in")
 
-            self._hx = hx711_module.SimpleHX711(
-                LOAD_CELL_DATA_PIN,
-                LOAD_CELL_CLOCK_PIN,
-                self._reference_unit,
-                self._offset,
-            )
-            self._hx.setUnit(hx711_module.Mass.Unit.LB)
+            self._data_pin = digitalio.DigitalInOut(getattr(board, f"D{LOAD_CELL_DATA_PIN}"))
+            self._data_pin.direction = digitalio.Direction.INPUT
+            self._clock_pin = digitalio.DigitalInOut(getattr(board, f"D{LOAD_CELL_CLOCK_PIN}"))
+            self._clock_pin.direction = digitalio.Direction.OUTPUT
+
+            self._hx = hx711_module.HX711(self._data_pin, self._clock_pin)
+            self._hx.tare_value_a = int(self._zero)
+            self._channel = analog_in_module.AnalogIn(self._hx, hx711_module.HX711.CHAN_A_GAIN_128)
 
             self.available = True
             logger.info(
-                "load sampler ready: data_pin=%s clock_pin=%s reference_unit=%s offset=%s",
+                "load sampler ready: data_pin=%s clock_pin=%s reference_unit=%s zero=%s",
                 LOAD_CELL_DATA_PIN,
                 LOAD_CELL_CLOCK_PIN,
                 self._reference_unit,
-                self._offset,
+                self._zero,
             )
         except Exception as exc:
             self.error = str(exc)
@@ -71,20 +76,6 @@ class LoadSampler:
         package_path = str(RASPBERRY_PI_SYSTEM_PACKAGES)
         if RASPBERRY_PI_SYSTEM_PACKAGES.exists() and package_path not in sys.path:
             sys.path.append(package_path)
-
-    def _load_calibration(self) -> tuple[float, float]:
-        if not self._calibration_path.exists():
-            return LOAD_CELL_REFERENCE_UNIT, LOAD_CELL_OFFSET
-
-        try:
-            payload = json.loads(self._calibration_path.read_text(encoding="utf-8"))
-            return (
-                float(payload.get("reference_unit", LOAD_CELL_REFERENCE_UNIT)),
-                float(payload.get("offset", LOAD_CELL_OFFSET)),
-            )
-        except Exception:
-            logger.exception("failed to load load cell calibration, using defaults")
-            return LOAD_CELL_REFERENCE_UNIT, LOAD_CELL_OFFSET
 
     def start(self) -> None:
         if not self.available:
@@ -113,9 +104,17 @@ class LoadSampler:
                 self._data_file.close()
             self._data_file = None
 
-        if self._hx is not None and hasattr(self._hx, "powerDown"):
+        if self._hx is not None and hasattr(self._hx, "power_down"):
             with contextlib.suppress(Exception):
-                self._hx.powerDown()
+                self._hx.power_down(True)
+        if self._data_pin is not None:
+            with contextlib.suppress(Exception):
+                self._data_pin.deinit()
+            self._data_pin = None
+        if self._clock_pin is not None:
+            with contextlib.suppress(Exception):
+                self._clock_pin.deinit()
+            self._clock_pin = None
 
     def status_payload(self) -> bool:
         with self._lock:
@@ -150,13 +149,22 @@ class LoadSampler:
         while not self._stop_event.is_set():
             try:
                 timestamp_ms = int(time.time() * 1000)
-                pounds = max(0.0, float(self._hx.weight(LOAD_CELL_SAMPLES_PER_READING)))
+                raw_value = self._read_raw_value()
+                pounds = max(0.0, raw_value / self._reference_unit)
                 self._record_sample(timestamp_ms, pounds)
             except Exception:
                 logger.exception("failed to record load sample")
                 with self._lock:
                     self._sensor_ok = False
                 time.sleep(0.05)
+
+    def _read_raw_value(self) -> float:
+        sample_total = 0
+
+        for _ in range(LOAD_CELL_SAMPLES_PER_READING):
+            sample_total += int(self._channel.value)
+
+        return sample_total / LOAD_CELL_SAMPLES_PER_READING
 
     def _record_sample(self, timestamp_ms: int, pounds: float) -> None:
         cutoff = timestamp_ms - LOAD_CELL_WINDOW_SECONDS * 1000
