@@ -37,30 +37,28 @@ export function VideoWidget() {
         <CardTitle>Video Feed</CardTitle>
       </CardHeader>
       <CardContent className="relative flex min-h-0 flex-1">
-        {!hasSignal ? (
-          <div className="bg-muted text-muted-foreground flex flex-1 items-center justify-center border text-sm">
-            NO VIDEO SIGNAL
-          </div>
-        ) : null}
-
         <div
           className={cn(
-            "bg-muted flex w-full justify-center",
+            "bg-muted flex w-full items-center justify-center",
             "bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,var(--border)_10px,var(--border)_11px)]",
           )}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            alt="Live camera feed"
-            className={cn({ hidden: !hasSignal })}
-            onError={() => {
-              setHasSignal(false);
-            }}
-            onLoad={() => {
-              setHasSignal(true);
-            }}
-            src={streamUrl}
-          />
+          {!hasSignal ? (
+            <div className="bg-muted text-muted-foreground border p-2 text-sm">NO VIDEO SIGNAL</div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              alt="Live camera feed"
+              className={cn({ hidden: !hasSignal })}
+              onError={() => {
+                setHasSignal(false);
+              }}
+              onLoad={() => {
+                setHasSignal(true);
+              }}
+              src={streamUrl}
+            />
+          )}
         </div>
       </CardContent>
     </WidgetCard>

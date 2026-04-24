@@ -7,8 +7,7 @@ import { IgnitionState } from "@/types/ignition";
 import { ServoState } from "@/types/servo";
 
 const HISTORY_WINDOW_MS = 30_000;
-const RESPONSE_DELAY_MS = 20;
-const SAMPLE_INTERVAL_MS = 100;
+const SAMPLE_INTERVAL_MS = 50;
 const LOAD_SENSOR_MAX_LB = 200;
 const DEFAULT_PORT = 8765;
 const DEFAULT_HOST = "0.0.0.0";
@@ -315,16 +314,8 @@ function errorResponse(id: JsonRpcId, code: number, message: string) {
 }
 
 async function send(socket: WebSocket, payload: unknown) {
-  await delay(RESPONSE_DELAY_MS);
-
   if (socket.readyState !== socket.OPEN) return;
   socket.send(JSON.stringify(payload));
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 function shutdown() {
