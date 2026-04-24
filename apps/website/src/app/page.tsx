@@ -2,6 +2,7 @@ import React from "react";
 
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ControlWidget } from "@/components/widgets/control/control-widget";
+import { LoadWidget } from "@/components/widgets/load/load-widget";
 import { PressureWidget } from "@/components/widgets/pressure/pressure-widget";
 import { WidgetCard } from "@/components/widgets/widget-card";
 
@@ -29,6 +30,9 @@ export default function Page() {
         <CardHeader>
           <CardTitle>Load Monitor</CardTitle>
         </CardHeader>
+        <CardContent className="flex min-h-0 flex-1 overflow-hidden">
+          <LoadWidget />
+        </CardContent>
       </WidgetCard>
     </div>
   );

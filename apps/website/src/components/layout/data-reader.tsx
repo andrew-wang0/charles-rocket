@@ -6,7 +6,7 @@ import { client, ConnectionStatus } from "@/client";
 import { useConnectionStatus } from "@/hooks/use-connection-status";
 import { useStore } from "@/lib/store";
 
-const READINGS_POLL_DELAY_MS = 10;
+const READINGS_POLL_DELAY_MS = 0;
 
 function delay(ms: number) {
   return new Promise((resolve) => {
@@ -15,6 +15,7 @@ function delay(ms: number) {
 }
 
 export function DataReader() {
+  const appendLoadReadings = useStore((store) => store.appendLoadReadings);
   const status = useConnectionStatus();
   const appendPressureReadings = useStore((store) => store.appendPressureReadings);
   const setLoadReadings = useStore((store) => store.setLoadReadings);
@@ -35,12 +36,13 @@ export function DataReader() {
           const response = await client.readings(shouldFetchHistory ? { history: true } : {});
 
           setReadingsStatus(response.status);
-          setLoadReadings(response.data.load);
 
           if (shouldFetchHistory) {
+            setLoadReadings(response.data.load);
             setPressureWindows(response.data.pressure);
             shouldFetchHistory = false;
           } else {
+            appendLoadReadings(response.data.load);
             appendPressureReadings(response.data.pressure);
           }
 
@@ -54,7 +56,14 @@ export function DataReader() {
     return () => {
       cancelledRef.current = true;
     };
-  }, [appendPressureReadings, setLoadReadings, setPressureWindows, setReadingsStatus, status]);
+  }, [
+    appendLoadReadings,
+    appendPressureReadings,
+    setLoadReadings,
+    setPressureWindows,
+    setReadingsStatus,
+    status,
+  ]);
 
   return null;
 }

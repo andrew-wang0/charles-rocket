@@ -6,7 +6,7 @@ import { client } from "@/client";
 import { Separator } from "@/components/ui/separator";
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { useStore } from "@/lib/store";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/util/cn";
 import { ServoState } from "@/types/servo";
 
 type Props = React.ComponentProps<"div">;
@@ -17,7 +17,7 @@ function isServoUnavailable(state: ServoState) {
   );
 }
 
-export function ServoQuickControl({ className, ...props }: Props) {
+export function ServoCloseAll({ className, ...props }: Props) {
   const [isPending, setIsPending] = React.useState(false);
   const isDisabled = useStore((store) => store.servoStates.some(isServoUnavailable)) || isPending;
 

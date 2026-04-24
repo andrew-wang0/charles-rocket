@@ -9,6 +9,7 @@ import { ServoState } from "@/types/servo";
 const HISTORY_WINDOW_MS = 30_000;
 const RESPONSE_DELAY_MS = 20;
 const SAMPLE_INTERVAL_MS = 100;
+const LOAD_SENSOR_MAX_LB = 200;
 const DEFAULT_PORT = 8765;
 const DEFAULT_HOST = "0.0.0.0";
 
@@ -31,14 +32,19 @@ const pressureBuffers: TimedReading[][] = Array.from(
   { length: PRESSURE_TRANSDUCER_COUNT },
   () => [],
 );
+const loadBuffer: TimedReading[] = [];
 const latestPressureValues = Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () =>
   randomPressureValue(),
 );
+let latestLoadValue = randomLoadValue();
 
 seedPressureHistory();
+seedLoadHistory();
 
 const sampler = setInterval(() => {
-  appendPressureSample(Date.now());
+  const now = Date.now();
+  appendPressureSample(now);
+  appendLoadSample(now);
 }, SAMPLE_INTERVAL_MS);
 
 const port = Number(process.env.MOCK_WS_PORT ?? DEFAULT_PORT);
@@ -152,10 +158,10 @@ function handleReadings(params: unknown) {
     status: {
       servoControllerOk: true,
       pressureSensorsOk: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => true),
-      loadSensorOk: false,
+      loadSensorOk: true,
     },
     data: {
-      load: [],
+      load: includeHistory ? loadHistory() : latestLoadPayload(),
       pressure: includeHistory ? pressureHistory() : latestPressurePayload(),
     },
   };
@@ -181,6 +187,15 @@ function pressureHistory() {
   return pressureBuffers.map((buffer) => [...buffer]);
 }
 
+function latestLoadPayload() {
+  const latest = loadBuffer.at(-1);
+  return latest ? [latest] : [];
+}
+
+function loadHistory() {
+  return [...loadBuffer];
+}
+
 function appendPressureSample(now: number) {
   for (let index = 0; index < PRESSURE_TRANSDUCER_COUNT; index += 1) {
     latestPressureValues[index] = nextPressureValue(latestPressureValues[index]);
@@ -188,11 +203,20 @@ function appendPressureSample(now: number) {
       time: now,
       value: latestPressureValues[index],
     });
-    trimPressureBuffer(pressureBuffers[index], now);
+    trimBuffer(pressureBuffers[index], now);
   }
 }
 
-function trimPressureBuffer(buffer: TimedReading[], now: number) {
+function appendLoadSample(now: number) {
+  latestLoadValue = nextLoadValue(latestLoadValue);
+  loadBuffer.push({
+    time: now,
+    value: latestLoadValue,
+  });
+  trimBuffer(loadBuffer, now);
+}
+
+function trimBuffer(buffer: TimedReading[], now: number) {
   const cutoff = now - HISTORY_WINDOW_MS;
 
   while ((buffer[0]?.time ?? Number.POSITIVE_INFINITY) < cutoff) {
@@ -212,6 +236,18 @@ function seedPressureHistory() {
   }
 }
 
+function seedLoadHistory() {
+  const now = Date.now();
+
+  for (
+    let timestamp = now - HISTORY_WINDOW_MS + SAMPLE_INTERVAL_MS;
+    timestamp <= now;
+    timestamp += SAMPLE_INTERVAL_MS
+  ) {
+    appendLoadSample(timestamp);
+  }
+}
+
 function nextPressureValue(previous: number) {
   const delta = (Math.random() - 0.5) * 50;
   return clamp(previous + delta, 0, 500);
@@ -219,6 +255,15 @@ function nextPressureValue(previous: number) {
 
 function randomPressureValue() {
   return Math.random() * 500;
+}
+
+function nextLoadValue(previous: number) {
+  const delta = (Math.random() - 0.5) * 24;
+  return clamp(previous + delta, 0, LOAD_SENSOR_MAX_LB);
+}
+
+function randomLoadValue() {
+  return Math.random() * LOAD_SENSOR_MAX_LB;
 }
 
 function clamp(value: number, min: number, max: number) {

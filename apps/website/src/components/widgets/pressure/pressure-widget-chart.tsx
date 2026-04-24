@@ -11,10 +11,12 @@ import {
 } from "@/components/ui/chart";
 import type { TimedReadings } from "@/lib/store";
 import { useStore } from "@/lib/store";
-
-const CHART_WINDOW_MS = 30_000;
-const CHART_TICK_INTERVAL_MS = 5_000;
-const CHART_BUCKET_MS = 100;
+import {
+  bucketReadings,
+  CHART_WINDOW_MS,
+  createTickValues,
+  formatRelativeTick,
+} from "@/lib/util/chart";
 
 type PressureChartPoint = {
   time: number;
@@ -38,41 +40,8 @@ export const chartConfig = {
   },
 } satisfies ChartConfig;
 
-export function formatPsi(value: number | undefined) {
-  if (value === undefined) return "--";
-  return value.toFixed(2);
-}
-
-function createTickValues(windowStart: number, latestTime: number) {
-  const tickCount = CHART_WINDOW_MS / CHART_TICK_INTERVAL_MS;
-
-  return Array.from({ length: tickCount + 1 }, (_, index) => {
-    const tick = windowStart + index * CHART_TICK_INTERVAL_MS;
-    return Math.min(tick, latestTime);
-  });
-}
-
-function formatRelativeTick(value: number, latestTime: number) {
-  const secondsFromLatest = Math.round((value - latestTime) / 1000);
-  return String(secondsFromLatest);
-}
-
-function bucketReadingsBySecond(readings: TimedReadings) {
-  const buckets = new Map<number, TimedReadings[number]>();
-
-  for (const reading of readings) {
-    const bucketTime = Math.floor(reading.time / CHART_BUCKET_MS) * CHART_BUCKET_MS;
-    buckets.set(bucketTime, {
-      time: bucketTime,
-      value: reading.value,
-    });
-  }
-
-  return Array.from(buckets.values()).sort((left, right) => left.time - right.time);
-}
-
 function buildChartData(pressureReadings: TimedReadings[]): PressureChartPoint[] {
-  const bucketedReadings = pressureReadings.map(bucketReadingsBySecond);
+  const bucketedReadings = pressureReadings.map(bucketReadings);
   const timestamps = Array.from(
     new Set(bucketedReadings.flatMap((readings) => readings.map((reading) => reading.time))),
   ).sort((left, right) => left - right);
@@ -111,7 +80,7 @@ export function PressureWidgetChart() {
         accessibilityLayer
         data={chartData}
         margin={{
-          left: 10,
+          left: 18,
           right: 10,
         }}
       >
@@ -131,7 +100,7 @@ export function PressureWidgetChart() {
         <ChartTooltip
           cursor={false}
           content={<ChartTooltipContent indicator="line" />}
-          labelFormatter={() => ""}
+          labelFormatter={() => null}
         />
         <ChartLegend content={<ChartLegendContent />} />
         <Line

@@ -12,7 +12,7 @@ export const timedReadings = z
   .array();
 
 export type TimedReadings = z.infer<typeof timedReadings>;
-const PRESSURE_WINDOW_MS = 30_000;
+const READINGS_WINDOW_MS = 30_000;
 
 export type ReadingsStatus = {
   servoControllerOk: boolean;
@@ -28,6 +28,7 @@ type Store = {
 
   loadReadings: TimedReadings;
   setLoadReadings: (readings: TimedReadings) => void;
+  appendLoadReadings: (readings: TimedReadings) => void;
 
   readingsStatus: ReadingsStatus;
   setReadingsStatus: (status: ReadingsStatus) => void;
@@ -40,6 +41,18 @@ type Store = {
 
 function createInitialServoStates() {
   return Array.from({ length: SERVO_COUNT }, () => ServoState.UNKNOWN);
+}
+
+function mergeReadingsWindow(existing: TimedReadings, incoming: TimedReadings) {
+  if (incoming.length === 0) return existing;
+
+  const lastTime = existing.at(-1)?.time ?? -1;
+  const next = incoming.filter((reading) => reading.time > lastTime);
+  if (next.length === 0) return existing;
+
+  const merged = [...existing, ...next];
+  const cutoff = (merged.at(-1)?.time ?? 0) - READINGS_WINDOW_MS;
+  return merged.filter((reading) => reading.time >= cutoff);
 }
 
 export const useStore = create<Store>((set) => ({
@@ -58,15 +71,7 @@ export const useStore = create<Store>((set) => ({
     set((state) => {
       const pressureReadings = state.pressureReadings.map((existing, index) => {
         const incoming = readings[index] ?? [];
-        if (incoming.length === 0) return existing;
-
-        const lastTime = existing.at(-1)?.time ?? -1;
-        const next = incoming.filter((reading) => reading.time > lastTime);
-        if (next.length === 0) return existing;
-
-        const merged = [...existing, ...next];
-        const cutoff = (merged.at(-1)?.time ?? 0) - PRESSURE_WINDOW_MS;
-        return merged.filter((reading) => reading.time >= cutoff);
+        return mergeReadingsWindow(existing, incoming);
       });
 
       return { pressureReadings };
@@ -75,6 +80,11 @@ export const useStore = create<Store>((set) => ({
   loadReadings: [],
 
   setLoadReadings: (readings) => set({ loadReadings: readings }),
+
+  appendLoadReadings: (readings) =>
+    set((state) => ({
+      loadReadings: mergeReadingsWindow(state.loadReadings, readings),
+    })),
 
   readingsStatus: {
     servoControllerOk: false,

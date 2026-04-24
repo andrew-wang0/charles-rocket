@@ -5,7 +5,7 @@ import React from "react";
 import { client } from "@/client";
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { useServo } from "@/hooks/use-servo";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/util/cn";
 import { ServoState } from "@/types/servo";
 
 type Props = {

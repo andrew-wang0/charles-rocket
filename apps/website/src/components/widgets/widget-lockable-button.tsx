@@ -5,7 +5,7 @@ import React from "react";
 
 import { Button } from "@/components/ui/button";
 import { useWidgetLock } from "@/components/widgets/widget-lock";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/util/cn";
 
 type Props = React.ComponentProps<typeof Button>;
 

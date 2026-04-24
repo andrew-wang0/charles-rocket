@@ -5,7 +5,7 @@ import React from "react";
 import { ConnectionStatus } from "@/client";
 import { Card } from "@/components/ui/card";
 import { useConnectionStatus } from "@/hooks/use-connection-status";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/util/cn";
 
 type Props = React.ComponentProps<typeof Card>;
 

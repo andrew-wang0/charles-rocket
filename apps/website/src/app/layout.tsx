@@ -6,7 +6,7 @@ import React from "react";
 
 import { DataReader } from "@/components/layout/data-reader";
 import { Header } from "@/components/layout/header/header";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/util/cn";
 
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
