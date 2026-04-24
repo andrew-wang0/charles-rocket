@@ -5,7 +5,11 @@ import { PRESSURE_TRANSDUCER_COUNT } from "@/lib/constants";
 import { timedReadings } from "@/lib/store";
 
 export const readings = method({
-  paramsSchema: z.void(),
+  paramsSchema: z
+    .object({
+      history: z.boolean().optional(),
+    })
+    .optional(),
   resultSchema: z.object({
     status: z.object({
       servoControllerOk: z.boolean(),

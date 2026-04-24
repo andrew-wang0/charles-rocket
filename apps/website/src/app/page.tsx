@@ -2,6 +2,7 @@ import React from "react";
 
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ControlWidget } from "@/components/widgets/control/control-widget";
+import { PressureWidget } from "@/components/widgets/pressure/pressure-widget";
 import { WidgetCard } from "@/components/widgets/widget-card";
 
 export default function Page() {
@@ -20,6 +21,9 @@ export default function Page() {
         <CardHeader>
           <CardTitle>PT Monitor</CardTitle>
         </CardHeader>
+        <CardContent>
+          <PressureWidget />
+        </CardContent>
       </WidgetCard>
       <WidgetCard size="sm">
         <CardHeader>

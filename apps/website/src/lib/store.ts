@@ -6,16 +6,19 @@ import { ServoState } from "@/types/servo";
 
 export const timedReadings = z
   .object({
-    time: z.iso.time(),
+    time: z.number().int().nonnegative(),
     value: z.number(),
   })
   .array();
 
 type TimedReadings = z.infer<typeof timedReadings>;
+const PRESSURE_WINDOW_MS = 30_000;
 
 type Store = {
   pressureReadings: TimedReadings[];
   setPressureReadings: (index: number, readings: TimedReadings) => void;
+  setPressureWindows: (readings: TimedReadings[]) => void;
+  appendPressureReadings: (readings: TimedReadings[]) => void;
 
   loadReadings: TimedReadings;
   setLoadReadings: (readings: TimedReadings) => void;
@@ -37,6 +40,22 @@ export const useStore = create<Store>((set) => ({
     set((state) => {
       const pressureReadings = [...state.pressureReadings];
       pressureReadings[index] = readings;
+      return { pressureReadings };
+    }),
+
+  setPressureWindows: (readings) => set({ pressureReadings: readings }),
+
+  appendPressureReadings: (readings) =>
+    set((state) => {
+      const pressureReadings = state.pressureReadings.map((existing, index) => {
+        const incoming = readings[index] ?? [];
+        if (incoming.length === 0) return existing;
+
+        const merged = [...existing, ...incoming];
+        const cutoff = (merged.at(-1)?.time ?? 0) - PRESSURE_WINDOW_MS;
+        return merged.filter((reading) => reading.time >= cutoff);
+      });
+
       return { pressureReadings };
     }),
 

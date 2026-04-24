@@ -10,6 +10,7 @@ from websockets.exceptions import ConnectionClosed
 
 from .constants import HOST, PORT, SERVO_CHANNELS
 from .controllers import ServoController, ServoStableState
+from .pressure import PressureSampler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +25,6 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 SERVER_ERROR = -32000
 
-PRESSURE_SENSOR_COUNT = 3
 SERVO_CHANNEL_BY_INDEX = {
     index: channel for index, channel in enumerate(SERVO_CHANNELS, start=1)
 }
@@ -33,6 +33,7 @@ SERVO_INDEX_BY_CHANNEL = {
 }
 
 servo_controller = ServoController()
+pressure_sampler = PressureSampler()
 ignition_state = "UNKNOWN"
 clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
@@ -93,16 +94,20 @@ def build_servo_snapshot() -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def build_readings_result() -> dict[str, Any]:
+def build_readings_result(include_history: bool = False) -> dict[str, Any]:
     return {
         "status": {
             "servoControllerOk": servo_controller.available,
-            "pressureSensorsOk": [False] * PRESSURE_SENSOR_COUNT,
+            "pressureSensorsOk": pressure_sampler.status_payload(),
             "loadSensorOk": False,
         },
         "data": {
             "load": [],
-            "pressure": [[] for _ in range(PRESSURE_SENSOR_COUNT)],
+            "pressure": (
+                pressure_sampler.history_payload()
+                if include_history
+                else pressure_sampler.latest_payload()
+            ),
         },
     }
 
@@ -256,7 +261,8 @@ async def dispatch_request(
         return handle_ignition_control(params)
 
     if method == "readings":
-        return build_readings_result()
+        include_history = isinstance(params, dict) and bool(params.get("history"))
+        return build_readings_result(include_history=include_history)
 
     raise LookupError("Method not found")
 
@@ -353,6 +359,7 @@ async def handler(websocket: Any, _path: str | None = None) -> None:
 
 async def main() -> None:
     logging.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
+    pressure_sampler.start()
 
     try:
         async with websockets.serve(handler, HOST, PORT):
@@ -364,4 +371,5 @@ async def main() -> None:
             task.cancel()
 
         await asyncio.gather(*transition_tasks, return_exceptions=True)
+        pressure_sampler.stop()
         servo_controller.close()
