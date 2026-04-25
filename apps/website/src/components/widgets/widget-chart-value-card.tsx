@@ -10,7 +10,7 @@ type Props = {
   label: string;
   color: string;
   value: number | undefined;
-  display: (value: number) => string;
+  display: (value: number | undefined) => string;
   onTare?: () => void;
   trackMax?: boolean;
 } & React.ComponentProps<typeof Card>;
@@ -43,11 +43,9 @@ export function WidgetChartValueCard({
       <CardContent className="flex justify-between p-2">
         <div>
           <div className="text-muted-foreground text-xs">{label}</div>
-          <div className="flex items-end space-x-4">
-            <div className="mt-1 font-mono text-lg tabular-nums">{value}</div>
-            {trackMax && (
-              <div className="text-muted-foreground">MAX: {max ? display(max) : "--"}</div>
-            )}
+          <div className="flex items-end space-x-6">
+            <div className="mt-1 font-mono text-lg tabular-nums">{display(value)}</div>
+            {trackMax && <div className="text-muted-foreground">MAX: {display(max)}</div>}
           </div>
         </div>
         {onTare && (
