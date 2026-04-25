@@ -3,7 +3,7 @@ adafruit-blinka
 adafruit-circuitpython-ads1x15
 adafruit-circuitpython-motor
 adafruit-circuitpython-pca9685
-# Requires system libraries: libhx711 and liblgpio.
-hx711-rpi-py
+RPi.GPIO
+hx711
 opencv-python-headless
 websockets

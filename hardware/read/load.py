@@ -14,7 +14,6 @@ from config import (
     LOAD_CELL_CLOCK_PIN,
     LOAD_CELL_DATA_PIN,
     LOAD_CELL_OFFSET,
-    LOAD_CELL_RATE_HZ,
     LOAD_CELL_REFERENCE_UNIT,
     LOAD_CELL_SAMPLES_PER_READING,
     LOAD_CELL_WINDOW_SECONDS,
@@ -32,7 +31,7 @@ class LoadSampler:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._hx: Any | None = None
-        self._read_options: Any | None = None
+        self._gpio: Any | None = None
         self._sensor_ok = False
         self._buffer: deque[tuple[int, float]] = deque()
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "load-cell"
@@ -41,28 +40,24 @@ class LoadSampler:
         self._zero = calibration.zero if calibration else LOAD_CELL_OFFSET
 
         try:
-            hx711_module = importlib.import_module("HX711")
-            self._hx = hx711_module.SimpleHX711(
-                LOAD_CELL_DATA_PIN,
-                LOAD_CELL_CLOCK_PIN,
-                self._reference_unit,
-                self._zero,
-                self._get_rate(hx711_module),
+            hx711_module = importlib.import_module("hx711")
+            self._gpio = importlib.import_module("RPi.GPIO")
+            self._hx = hx711_module.HX711(
+                dout_pin=LOAD_CELL_DATA_PIN,
+                pd_sck_pin=LOAD_CELL_CLOCK_PIN,
+                channel="A",
+                gain=128,
             )
-            self._hx.setUnit(hx711_module.Mass.Unit.LB)
-            self._read_options = hx711_module.Options(
-                LOAD_CELL_SAMPLES_PER_READING,
-                hx711_module.ReadType.Average,
-            )
+            self._hx.min_measures = 1
+            self._hx.reset()
 
             self.available = True
             logger.info(
-                "load sampler ready: data_pin=%s clock_pin=%s reference_unit=%s zero=%s rate_hz=%s",
+                "load sampler ready: data_pin=%s clock_pin=%s reference_unit=%s zero=%s",
                 LOAD_CELL_DATA_PIN,
                 LOAD_CELL_CLOCK_PIN,
                 self._reference_unit,
                 self._zero,
-                LOAD_CELL_RATE_HZ,
             )
         except Exception as exc:
             self.error = self._format_init_error(exc)
@@ -71,20 +66,11 @@ class LoadSampler:
     def _format_init_error(self, exc: Exception) -> str:
         if isinstance(exc, (ImportError, ModuleNotFoundError, OSError)):
             return (
-                f"{exc}. Install libhx711/liblgpio on the Raspberry Pi and "
-                "install `hx711-rpi-py` in the hardware virtualenv."
+                f"{exc}. Install `hx711` and ensure `RPi.GPIO` is available "
+                "in the hardware virtualenv."
             )
 
         return str(exc)
-
-    def _get_rate(self, hx711_module: Any):
-        if LOAD_CELL_RATE_HZ == 10:
-            return hx711_module.Rate.HZ_10
-
-        if LOAD_CELL_RATE_HZ == 80:
-            return hx711_module.Rate.HZ_80
-
-        raise ValueError(f"unsupported LOAD_CELL_RATE_HZ: {LOAD_CELL_RATE_HZ}")
 
     def start(self) -> None:
         if not self.available:
@@ -113,10 +99,15 @@ class LoadSampler:
                 self._data_file.close()
             self._data_file = None
 
-        if self._hx is not None and hasattr(self._hx, "disconnect"):
+        if self._hx is not None and hasattr(self._hx, "power_down"):
             with contextlib.suppress(Exception):
-                self._hx.disconnect()
+                self._hx.power_down()
             self._hx = None
+
+        if self._gpio is not None:
+            with contextlib.suppress(Exception):
+                self._gpio.cleanup((LOAD_CELL_DATA_PIN, LOAD_CELL_CLOCK_PIN))
+            self._gpio = None
 
     def status_payload(self) -> bool:
         with self._lock:
@@ -160,7 +151,13 @@ class LoadSampler:
                 time.sleep(0.05)
 
     def _read_weight(self) -> float:
-        return float(self._hx.weight(self._read_options))
+        raw_samples = self._hx.get_raw_data(times=LOAD_CELL_SAMPLES_PER_READING)
+
+        if not raw_samples:
+            raise RuntimeError("no load cell samples returned")
+
+        raw_value = sum(raw_samples) / len(raw_samples)
+        return (raw_value - self._zero) / self._reference_unit
 
     def _record_sample(self, timestamp_ms: int, pounds: float) -> None:
         cutoff = timestamp_ms - LOAD_CELL_WINDOW_SECONDS * 1000
