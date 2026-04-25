@@ -27,7 +27,6 @@ export function ControlWidget() {
           <Separator orientation="vertical" />
           <ServoManualControlUnit index={1} />
           <ServoManualControlUnit index={2} />
-
           <Separator orientation="vertical" />
         </CardContent>
       </WidgetCard>

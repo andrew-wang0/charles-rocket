@@ -164,6 +164,30 @@ def parse_servo_target(value: Any) -> ServoStableState:
     raise ValueError("Invalid params")
 
 
+def parse_servo_channel(value: Any) -> int:
+    index = int(value)
+    return SERVO_CHANNEL_BY_INDEX[index]
+
+
+def parse_servo_channels(value: Any) -> list[int]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("Invalid params")
+
+    channels: list[int] = []
+    seen: set[int] = set()
+
+    for entry in value:
+        channel = parse_servo_channel(entry)
+
+        if channel in seen:
+            raise ValueError("Invalid params")
+
+        seen.add(channel)
+        channels.append(channel)
+
+    return channels
+
+
 async def send_text(websocket: Any, payload: str) -> bool:
     lock = client_send_locks.get(websocket)
     if lock is None:
@@ -239,25 +263,11 @@ def track_transition_task(task: asyncio.Task[None]) -> None:
     task.add_done_callback(cleanup)
 
 
-async def handle_servo_control(
+async def finalize_servo_control(
     websocket: Any,
-    params: Any,
+    transitioned_channels: list[int],
+    target_state: ServoStableState,
 ) -> dict[str, Any]:
-    if not isinstance(params, dict):
-        raise ValueError("Invalid params")
-
-    try:
-        index = int(params["index"])
-        channel = SERVO_CHANNEL_BY_INDEX[index]
-        target_state = parse_servo_target(params["set"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("Invalid params") from exc
-
-    try:
-        transitioned_channels = await get_servo_controller().set_servo(channel, target_state)
-    except ValueError as exc:
-        raise RuntimeError(str(exc)) from exc
-
     snapshot = build_servo_snapshot()
 
     if transitioned_channels:
@@ -270,6 +280,48 @@ async def handle_servo_control(
         "result": "success",
         **snapshot,
     }
+
+
+async def handle_servo_control(
+    websocket: Any,
+    params: Any,
+) -> dict[str, Any]:
+    if not isinstance(params, dict):
+        raise ValueError("Invalid params")
+
+    try:
+        channel = parse_servo_channel(params["index"])
+        target_state = parse_servo_target(params["set"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid params") from exc
+
+    try:
+        transitioned_channels = await get_servo_controller().set_servo(channel, target_state)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    return await finalize_servo_control(websocket, transitioned_channels, target_state)
+
+
+async def handle_servo_control_many(
+    websocket: Any,
+    params: Any,
+) -> dict[str, Any]:
+    if not isinstance(params, dict):
+        raise ValueError("Invalid params")
+
+    try:
+        channels = parse_servo_channels(params["indexes"])
+        target_state = parse_servo_target(params["set"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid params") from exc
+
+    try:
+        transitioned_channels = await get_servo_controller().set_servos(channels, target_state)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    return await finalize_servo_control(websocket, transitioned_channels, target_state)
 
 
 def handle_ignition_control(params: Any) -> dict[str, Any]:
@@ -293,6 +345,9 @@ async def dispatch_request(
 ) -> dict[str, Any]:
     if method == "servoControl":
         return await handle_servo_control(websocket, params)
+
+    if method == "servoControlMany":
+        return await handle_servo_control_many(websocket, params)
 
     if method == "servoState":
         return build_servo_snapshot()

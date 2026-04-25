@@ -2,76 +2,40 @@
 
 import React from "react";
 
-import { client } from "@/client";
-import { Separator } from "@/components/ui/separator";
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
-import { useStore } from "@/lib/store";
+import { useServoControl, useServoGroup } from "@/hooks/use-servo";
+import { SERVO_COUNT } from "@/lib/constants";
 import { cn } from "@/lib/util/cn";
 import { ServoState } from "@/types/servo";
 
-type Props = React.ComponentProps<"div">;
-
-function isServoUnavailable(state: ServoState) {
-  return (
-    state === ServoState.UNKNOWN || state === ServoState.OPENING || state === ServoState.CLOSING
-  );
-}
+type Props = React.ComponentProps<typeof WidgetLockableButton>;
+const ALL_SERVO_INDEXES = Array.from({ length: SERVO_COUNT }, (_, index) => index);
 
 export function ServoCloseAll({ className, ...props }: Props) {
-  const [isPending, setIsPending] = React.useState(false);
-  const isDisabled = useStore((store) => store.servoStates.some(isServoUnavailable)) || isPending;
+  const { setServos } = useServoControl();
+  const servos = useServoGroup(ALL_SERVO_INDEXES);
+  const isDisabled = servos.isSwitching || servos.hasUnknown || servos.areAllClosed;
 
-  async function setServos(indexes: number[], targetState: ServoState.OPEN | ServoState.CLOSED) {
+  async function handleCloseAll() {
     if (isDisabled) return;
 
-    setIsPending(true);
-
     try {
-      await Promise.all(
-        indexes.map((index) =>
-          client.servoControl({
-            index,
-            set: targetState,
-          }),
-        ),
-      );
+      await setServos(ALL_SERVO_INDEXES, ServoState.CLOSED);
     } catch (error) {
-      console.error("Failed to update servo group", error);
-    } finally {
-      setIsPending(false);
+      console.error("Failed to close all servos", error);
     }
   }
 
   return (
-    <div className={cn("flex flex-col gap-y-2", className)} {...props}>
-      <WidgetLockableButton
-        disabled={isDisabled}
-        className="hover:bg-positive/20"
-        onClick={() => {
-          void setServos([1, 2, 3], ServoState.OPEN);
-        }}
-      >
-        OPEN ALL
-      </WidgetLockableButton>
-      <WidgetLockableButton
-        disabled={isDisabled}
-        className="hover:bg-destructive/20"
-        onClick={() => {
-          void setServos([1, 2, 3], ServoState.CLOSED);
-        }}
-      >
-        CLOSE ALL
-      </WidgetLockableButton>
-      <Separator />
-      <WidgetLockableButton
-        disabled={isDisabled}
-        className="hover:bg-positive/20"
-        onClick={() => {
-          void setServos([2, 3], ServoState.OPEN);
-        }}
-      >
-        OPEN 2 & OPEN 3
-      </WidgetLockableButton>
-    </div>
+    <WidgetLockableButton
+      disabled={isDisabled}
+      className={cn("hover:bg-negative/20", className)}
+      onClick={() => {
+        void handleCloseAll();
+      }}
+      {...props}
+    >
+      CLOSE ALL
+    </WidgetLockableButton>
   );
 }

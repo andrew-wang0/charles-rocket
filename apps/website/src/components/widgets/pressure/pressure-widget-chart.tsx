@@ -9,22 +9,13 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import type { TimedReadings } from "@/lib/store";
 import { useStore } from "@/lib/store";
 import {
-  bucketReadings,
   CHART_WINDOW_MS,
   createTickValues,
   formatAxisTick,
   formatRelativeTick,
 } from "@/lib/util/chart";
-
-type PressureChartPoint = {
-  time: number;
-  pt1: number | null;
-  pt2: number | null;
-  pt3: number | null;
-};
 
 export const chartConfig = {
   pt1: {
@@ -41,29 +32,8 @@ export const chartConfig = {
   },
 } satisfies ChartConfig;
 
-function buildChartData(pressureReadings: TimedReadings[]): PressureChartPoint[] {
-  const bucketedReadings = pressureReadings.map(bucketReadings);
-  const timestamps = Array.from(
-    new Set(bucketedReadings.flatMap((readings) => readings.map((reading) => reading.time))),
-  ).sort((left, right) => left - right);
-
-  if (timestamps.length === 0) return [];
-
-  const valueMaps = bucketedReadings.map(
-    (readings) => new Map(readings.map((reading) => [reading.time, reading.value])),
-  );
-
-  return timestamps.map((timestamp) => ({
-    time: timestamp,
-    pt1: valueMaps[0]?.get(timestamp) ?? null,
-    pt2: valueMaps[1]?.get(timestamp) ?? null,
-    pt3: valueMaps[2]?.get(timestamp) ?? null,
-  }));
-}
-
-export function PressureWidgetChart() {
-  const pressureReadings = useStore((store) => store.pressureReadings);
-  const chartData = React.useMemo(() => buildChartData(pressureReadings), [pressureReadings]);
+export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
+  const chartData = useStore((store) => store.pressureChartData);
   const latestTime = chartData.at(-1)?.time ?? 0;
   const windowStart = Math.max(0, latestTime - CHART_WINDOW_MS);
 
@@ -138,4 +108,4 @@ export function PressureWidgetChart() {
       </LineChart>
     </ChartContainer>
   );
-}
+});

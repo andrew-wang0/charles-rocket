@@ -11,20 +11,13 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import type { TimedReadings } from "@/lib/store";
 import { useStore } from "@/lib/store";
 import {
-  bucketReadings,
   CHART_WINDOW_MS,
   createTickValues,
   formatAxisTick,
   formatRelativeTick,
 } from "@/lib/util/chart";
-
-type LoadChartPoint = {
-  time: number;
-  load: number | null;
-};
 
 export const loadChartConfig = {
   load: {
@@ -33,16 +26,8 @@ export const loadChartConfig = {
   },
 } satisfies ChartConfig;
 
-function buildChartData(loadReadings: TimedReadings): LoadChartPoint[] {
-  return bucketReadings(loadReadings).map((reading) => ({
-    time: reading.time,
-    load: reading.value,
-  }));
-}
-
-export function LoadWidgetChart() {
-  const loadReadings = useStore((store) => store.loadReadings);
-  const chartData = React.useMemo(() => buildChartData(loadReadings), [loadReadings]);
+export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
+  const chartData = useStore((store) => store.loadChartData);
   const latestTime = chartData.at(-1)?.time ?? 0;
   const windowStart = Math.max(0, latestTime - CHART_WINDOW_MS);
 
@@ -100,4 +85,4 @@ export function LoadWidgetChart() {
       </LineChart>
     </ChartContainer>
   );
-}
+});

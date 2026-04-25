@@ -7,12 +7,9 @@ import { useConnectionStatus } from "@/hooks/use-connection-status";
 import { useStore } from "@/lib/store";
 
 export function DataReader() {
-  const appendLoadReadings = useStore((store) => store.appendLoadReadings);
+  const appendReadings = useStore((store) => store.appendReadings);
+  const hydrateReadings = useStore((store) => store.hydrateReadings);
   const status = useConnectionStatus();
-  const appendPressureReadings = useStore((store) => store.appendPressureReadings);
-  const setLoadReadings = useStore((store) => store.setLoadReadings);
-  const setPressureWindows = useStore((store) => store.setPressureWindows);
-  const setReadingsStatus = useStore((store) => store.setReadingsStatus);
   const cancelledRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -27,15 +24,15 @@ export function DataReader() {
         try {
           const response = await client.readings(shouldFetchHistory ? { history: true } : {});
 
-          setReadingsStatus(response.status);
-
           if (shouldFetchHistory) {
-            setLoadReadings(response.data.load);
-            setPressureWindows(response.data.pressure);
+            React.startTransition(() => {
+              hydrateReadings(response.status, response.data);
+            });
             shouldFetchHistory = false;
           } else {
-            appendLoadReadings(response.data.load);
-            appendPressureReadings(response.data.pressure);
+            React.startTransition(() => {
+              appendReadings(response.status, response.data);
+            });
           }
         } catch {
           return;
@@ -46,14 +43,7 @@ export function DataReader() {
     return () => {
       cancelledRef.current = true;
     };
-  }, [
-    appendLoadReadings,
-    appendPressureReadings,
-    setLoadReadings,
-    setPressureWindows,
-    setReadingsStatus,
-    status,
-  ]);
+  }, [appendReadings, hydrateReadings, status]);
 
   return null;
 }

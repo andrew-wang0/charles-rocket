@@ -11,8 +11,8 @@ import { useStore } from "@/lib/store";
 import { formatChartValue } from "@/lib/util/chart";
 
 export function LoadWidget() {
-  const loadReadings = useStore((store) => store.loadReadings);
-  const latest = loadReadings.at(-1)?.value;
+  const hasLoadData = useStore((store) => store.loadChartData.length > 0);
+  const latest = useStore((store) => store.loadLatestValue);
 
   return (
     <WidgetCard size="sm">
@@ -23,9 +23,12 @@ export function LoadWidget() {
         <WidgetChartValueCard
           label="Load"
           color={loadChartConfig.load.color}
-          value={`${formatChartValue(latest)} kg`}
+          value={latest}
+          display={(value) => `${formatChartValue(value)} kg`}
+          onTare={() => {}}
+          trackMax
         />
-        {loadReadings.length === 0 ? <WidgetAwaitingData /> : <LoadWidgetChart />}
+        {!hasLoadData ? <WidgetAwaitingData /> : <LoadWidgetChart />}
       </CardContent>
     </WidgetCard>
   );

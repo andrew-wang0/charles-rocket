@@ -14,8 +14,11 @@ import { useStore } from "@/lib/store";
 import { formatChartValue } from "@/lib/util/chart";
 
 export function PressureWidget() {
-  const pressureReadings = useStore((store) => store.pressureReadings);
-  const hasPressureData = pressureReadings.some((readings) => readings.length > 0);
+  const hasPressureData = useStore((store) => store.pressureChartData.length > 0);
+  const pt1 = useStore((store) => store.pressureLatestValues[0]);
+  const pt2 = useStore((store) => store.pressureLatestValues[1]);
+  const pt3 = useStore((store) => store.pressureLatestValues[2]);
+  const latestValues = [pt1, pt2, pt3];
 
   return (
     <WidgetCard size="sm">
@@ -26,14 +29,16 @@ export function PressureWidget() {
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
           <div className="flex shrink-0 gap-2">
             {Object.entries(chartConfig).map(([_, { label, color }], index) => {
-              const latest = pressureReadings[index]?.at(-1)?.value;
+              const latest = latestValues[index];
 
               return (
                 <WidgetChartValueCard
                   key={index}
                   label={label}
                   color={color}
-                  value={`${formatChartValue(latest)} PSI`}
+                  value={latest}
+                  display={(value) => `${formatChartValue(value)} PSI`}
+                  onTare={() => {}}
                 />
               );
             })}

@@ -2,7 +2,7 @@ import { method } from "@danscan/zod-jsonrpc";
 import z from "zod";
 
 import { PRESSURE_TRANSDUCER_COUNT } from "@/lib/constants";
-import { timedReadings } from "@/lib/store";
+import { timedReadings } from "@/lib/readings";
 
 export const readings = method({
   paramsSchema: z

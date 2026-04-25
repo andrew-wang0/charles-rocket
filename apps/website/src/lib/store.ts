@@ -1,18 +1,18 @@
-import z from "zod";
 import { create } from "zustand";
 
 import { PRESSURE_TRANSDUCER_COUNT, SERVO_COUNT } from "@/lib/constants";
+import type { TimedReadings } from "@/lib/readings";
+import {
+  appendLoadChartData,
+  appendPressureChartData,
+  buildLoadChartData,
+  buildPressureChartData,
+  type LoadChartPoint,
+  type PressureChartPoint,
+} from "@/lib/util/chart";
 import { ServoState } from "@/types/servo";
 
-export const timedReadings = z
-  .object({
-    time: z.number().int().nonnegative(),
-    value: z.number(),
-  })
-  .array();
-
-export type TimedReadings = z.infer<typeof timedReadings>;
-const READINGS_WINDOW_MS = 30_000;
+const INITIAL_TIME = -1;
 
 export type ReadingsStatus = {
   servoControllerOk: boolean;
@@ -21,17 +21,30 @@ export type ReadingsStatus = {
 };
 
 type Store = {
-  pressureReadings: TimedReadings[];
-  setPressureReadings: (index: number, readings: TimedReadings) => void;
-  setPressureWindows: (readings: TimedReadings[]) => void;
-  appendPressureReadings: (readings: TimedReadings[]) => void;
+  pressureChartData: PressureChartPoint[];
+  pressureLatestTimes: number[];
+  pressureLatestValues: Array<number | undefined>;
 
-  loadReadings: TimedReadings;
-  setLoadReadings: (readings: TimedReadings) => void;
-  appendLoadReadings: (readings: TimedReadings) => void;
+  loadChartData: LoadChartPoint[];
+  loadLatestTime: number;
+  loadLatestValue: number | undefined;
+
+  hydrateReadings: (
+    status: ReadingsStatus,
+    data: {
+      load: TimedReadings;
+      pressure: TimedReadings[];
+    },
+  ) => void;
+  appendReadings: (
+    status: ReadingsStatus,
+    data: {
+      load: TimedReadings;
+      pressure: TimedReadings[];
+    },
+  ) => void;
 
   readingsStatus: ReadingsStatus;
-  setReadingsStatus: (status: ReadingsStatus) => void;
 
   servoStates: ServoState[];
   setServoState: (index: number, state: ServoState) => void;
@@ -43,56 +56,122 @@ function createInitialServoStates() {
   return Array.from({ length: SERVO_COUNT }, () => ServoState.UNKNOWN);
 }
 
-function mergeReadingsWindow(existing: TimedReadings, incoming: TimedReadings) {
-  if (incoming.length === 0) return existing;
+function createInitialPressureLatestTimes() {
+  return Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => INITIAL_TIME);
+}
 
-  const lastTime = existing.at(-1)?.time ?? -1;
-  const next = incoming.filter((reading) => reading.time > lastTime);
-  if (next.length === 0) return existing;
+function createInitialPressureLatestValues(): Array<number | undefined> {
+  return Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => undefined);
+}
 
-  const merged = [...existing, ...next];
-  const cutoff = (merged.at(-1)?.time ?? 0) - READINGS_WINDOW_MS;
-  return merged.filter((reading) => reading.time >= cutoff);
+function areReadingsStatusesEqual(left: ReadingsStatus, right: ReadingsStatus) {
+  return (
+    left.servoControllerOk === right.servoControllerOk &&
+    left.loadSensorOk === right.loadSensorOk &&
+    left.pressureSensorsOk.length === right.pressureSensorsOk.length &&
+    left.pressureSensorsOk.every((value, index) => value === right.pressureSensorsOk[index])
+  );
+}
+
+function filterNewReadings(incoming: TimedReadings, lastTime: number) {
+  let firstNewIndex = 0;
+
+  while ((incoming[firstNewIndex]?.time ?? Number.POSITIVE_INFINITY) <= lastTime) {
+    firstNewIndex += 1;
+  }
+
+  return firstNewIndex === 0 ? incoming : incoming.slice(firstNewIndex);
 }
 
 export const useStore = create<Store>((set) => ({
-  pressureReadings: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => []),
+  pressureChartData: [],
+  pressureLatestTimes: createInitialPressureLatestTimes(),
+  pressureLatestValues: createInitialPressureLatestValues(),
 
-  setPressureReadings: (index, readings) =>
+  loadChartData: [],
+  loadLatestTime: INITIAL_TIME,
+  loadLatestValue: undefined,
+
+  hydrateReadings: (status, data) =>
     set((state) => {
-      const pressureReadings = [...state.pressureReadings];
-      pressureReadings[index] = readings;
-      return { pressureReadings };
-    }),
+      const nextLoadLatest = data.load.at(-1);
+      const pressureLatestTimes = createInitialPressureLatestTimes();
+      const pressureLatestValues = createInitialPressureLatestValues();
 
-  setPressureWindows: (readings) => set({ pressureReadings: readings }),
-
-  appendPressureReadings: (readings) =>
-    set((state) => {
-      const pressureReadings = state.pressureReadings.map((existing, index) => {
-        const incoming = readings[index] ?? [];
-        return mergeReadingsWindow(existing, incoming);
+      data.pressure.forEach((readings, index) => {
+        const latest = readings.at(-1);
+        pressureLatestTimes[index] = latest?.time ?? INITIAL_TIME;
+        pressureLatestValues[index] = latest?.value;
       });
 
-      return { pressureReadings };
+      return {
+        pressureChartData: buildPressureChartData(data.pressure),
+        pressureLatestTimes,
+        pressureLatestValues,
+        loadChartData: buildLoadChartData(data.load),
+        loadLatestTime: nextLoadLatest?.time ?? INITIAL_TIME,
+        loadLatestValue: nextLoadLatest?.value,
+        readingsStatus: areReadingsStatusesEqual(state.readingsStatus, status)
+          ? state.readingsStatus
+          : status,
+      };
     }),
 
-  loadReadings: [],
+  appendReadings: (status, data) =>
+    set((state) => {
+      const nextLoadReadings = filterNewReadings(data.load, state.loadLatestTime);
+      const nextPressureReadings = data.pressure.map((readings, index) =>
+        filterNewReadings(readings, state.pressureLatestTimes[index] ?? INITIAL_TIME),
+      );
 
-  setLoadReadings: (readings) => set({ loadReadings: readings }),
+      const loadChanged = nextLoadReadings.length > 0;
+      const pressureChanged = nextPressureReadings.some((readings) => readings.length > 0);
+      const statusChanged = !areReadingsStatusesEqual(state.readingsStatus, status);
 
-  appendLoadReadings: (readings) =>
-    set((state) => ({
-      loadReadings: mergeReadingsWindow(state.loadReadings, readings),
-    })),
+      if (!loadChanged && !pressureChanged && !statusChanged) {
+        return state;
+      }
+
+      const nextState: Partial<Store> = {
+        readingsStatus: statusChanged ? status : state.readingsStatus,
+      };
+
+      if (loadChanged) {
+        const latestLoad = nextLoadReadings.at(-1);
+
+        nextState.loadChartData = appendLoadChartData(state.loadChartData, nextLoadReadings);
+        nextState.loadLatestTime = latestLoad?.time ?? state.loadLatestTime;
+        nextState.loadLatestValue = latestLoad?.value ?? state.loadLatestValue;
+      }
+
+      if (pressureChanged) {
+        const pressureLatestTimes = state.pressureLatestTimes.slice();
+        const pressureLatestValues = [...state.pressureLatestValues];
+
+        nextPressureReadings.forEach((readings, index) => {
+          const latest = readings.at(-1);
+          if (!latest) return;
+
+          pressureLatestTimes[index] = latest.time;
+          pressureLatestValues[index] = latest.value;
+        });
+
+        nextState.pressureChartData = appendPressureChartData(
+          state.pressureChartData,
+          nextPressureReadings,
+        );
+        nextState.pressureLatestTimes = pressureLatestTimes;
+        nextState.pressureLatestValues = pressureLatestValues;
+      }
+
+      return nextState;
+    }),
 
   readingsStatus: {
     servoControllerOk: false,
     pressureSensorsOk: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => false),
     loadSensorOk: false,
   },
-
-  setReadingsStatus: (readingsStatus) => set({ readingsStatus }),
 
   servoStates: createInitialServoStates(),
 
