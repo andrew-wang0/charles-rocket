@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import importlib
 import logging
-import sys
 import threading
 import time
 from collections import deque
@@ -15,13 +14,13 @@ from config import (
     LOAD_CELL_CLOCK_PIN,
     LOAD_CELL_DATA_PIN,
     LOAD_CELL_OFFSET,
+    LOAD_CELL_RATE_HZ,
     LOAD_CELL_REFERENCE_UNIT,
     LOAD_CELL_SAMPLES_PER_READING,
     LOAD_CELL_WINDOW_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
-RASPBERRY_PI_SYSTEM_PACKAGES = Path("/usr/lib/python3/dist-packages")
 
 
 class LoadSampler:
@@ -33,9 +32,7 @@ class LoadSampler:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._hx: Any | None = None
-        self._channel: Any | None = None
-        self._data_pin: Any | None = None
-        self._clock_pin: Any | None = None
+        self._read_options: Any | None = None
         self._sensor_ok = False
         self._buffer: deque[tuple[int, float]] = deque()
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "load-cell"
@@ -44,38 +41,50 @@ class LoadSampler:
         self._zero = calibration.zero if calibration else LOAD_CELL_OFFSET
 
         try:
-            self._add_raspberry_pi_system_packages()
-
-            board = importlib.import_module("board")
-            digitalio = importlib.import_module("digitalio")
-            hx711_module = importlib.import_module("adafruit_hx711.hx711")
-            analog_in_module = importlib.import_module("adafruit_hx711.analog_in")
-
-            self._data_pin = digitalio.DigitalInOut(getattr(board, f"D{LOAD_CELL_DATA_PIN}"))
-            self._data_pin.direction = digitalio.Direction.INPUT
-            self._clock_pin = digitalio.DigitalInOut(getattr(board, f"D{LOAD_CELL_CLOCK_PIN}"))
-            self._clock_pin.direction = digitalio.Direction.OUTPUT
-
-            self._hx = hx711_module.HX711(self._data_pin, self._clock_pin)
-            self._hx.tare_value_a = int(self._zero)
-            self._channel = analog_in_module.AnalogIn(self._hx, hx711_module.HX711.CHAN_A_GAIN_128)
-
-            self.available = True
-            logger.info(
-                "load sampler ready: data_pin=%s clock_pin=%s reference_unit=%s zero=%s",
+            hx711_module = importlib.import_module("HX711")
+            self._hx = hx711_module.SimpleHX711(
                 LOAD_CELL_DATA_PIN,
                 LOAD_CELL_CLOCK_PIN,
                 self._reference_unit,
                 self._zero,
+                self._get_rate(hx711_module),
+            )
+            self._hx.setUnit(hx711_module.Mass.Unit.LB)
+            self._read_options = hx711_module.Options(
+                LOAD_CELL_SAMPLES_PER_READING,
+                hx711_module.ReadType.Average,
+            )
+
+            self.available = True
+            logger.info(
+                "load sampler ready: data_pin=%s clock_pin=%s reference_unit=%s zero=%s rate_hz=%s",
+                LOAD_CELL_DATA_PIN,
+                LOAD_CELL_CLOCK_PIN,
+                self._reference_unit,
+                self._zero,
+                LOAD_CELL_RATE_HZ,
             )
         except Exception as exc:
-            self.error = str(exc)
+            self.error = self._format_init_error(exc)
             logger.exception("load sampler initialization failed")
 
-    def _add_raspberry_pi_system_packages(self) -> None:
-        package_path = str(RASPBERRY_PI_SYSTEM_PACKAGES)
-        if RASPBERRY_PI_SYSTEM_PACKAGES.exists() and package_path not in sys.path:
-            sys.path.append(package_path)
+    def _format_init_error(self, exc: Exception) -> str:
+        if isinstance(exc, (ImportError, ModuleNotFoundError, OSError)):
+            return (
+                f"{exc}. Install libhx711/liblgpio on the Raspberry Pi and "
+                "install `hx711-rpi-py` in the hardware virtualenv."
+            )
+
+        return str(exc)
+
+    def _get_rate(self, hx711_module: Any):
+        if LOAD_CELL_RATE_HZ == 10:
+            return hx711_module.Rate.HZ_10
+
+        if LOAD_CELL_RATE_HZ == 80:
+            return hx711_module.Rate.HZ_80
+
+        raise ValueError(f"unsupported LOAD_CELL_RATE_HZ: {LOAD_CELL_RATE_HZ}")
 
     def start(self) -> None:
         if not self.available:
@@ -104,17 +113,10 @@ class LoadSampler:
                 self._data_file.close()
             self._data_file = None
 
-        if self._hx is not None and hasattr(self._hx, "power_down"):
+        if self._hx is not None and hasattr(self._hx, "disconnect"):
             with contextlib.suppress(Exception):
-                self._hx.power_down(True)
-        if self._data_pin is not None:
-            with contextlib.suppress(Exception):
-                self._data_pin.deinit()
-            self._data_pin = None
-        if self._clock_pin is not None:
-            with contextlib.suppress(Exception):
-                self._clock_pin.deinit()
-            self._clock_pin = None
+                self._hx.disconnect()
+            self._hx = None
 
     def status_payload(self) -> bool:
         with self._lock:
@@ -149,8 +151,7 @@ class LoadSampler:
         while not self._stop_event.is_set():
             try:
                 timestamp_ms = int(time.time() * 1000)
-                raw_value = self._read_raw_value()
-                pounds = max(0.0, raw_value / self._reference_unit)
+                pounds = max(0.0, self._read_weight())
                 self._record_sample(timestamp_ms, pounds)
             except Exception:
                 logger.exception("failed to record load sample")
@@ -158,13 +159,8 @@ class LoadSampler:
                     self._sensor_ok = False
                 time.sleep(0.05)
 
-    def _read_raw_value(self) -> float:
-        sample_total = 0
-
-        for _ in range(LOAD_CELL_SAMPLES_PER_READING):
-            sample_total += int(self._channel.value)
-
-        return sample_total / LOAD_CELL_SAMPLES_PER_READING
+    def _read_weight(self) -> float:
+        return float(self._hx.weight(self._read_options))
 
     def _record_sample(self, timestamp_ms: int, pounds: float) -> None:
         cutoff = timestamp_ms - LOAD_CELL_WINDOW_SECONDS * 1000

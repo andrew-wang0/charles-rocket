@@ -4,12 +4,11 @@ import React from "react";
 
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { useServoControl, useServoGroup } from "@/hooks/use-servo";
-import { SERVO_COUNT } from "@/lib/constants";
+import { ALL_SERVO_INDEXES } from "@/lib/constants";
 import { cn } from "@/lib/util/cn";
 import { ServoState } from "@/types/servo";
 
 type Props = React.ComponentProps<typeof WidgetLockableButton>;
-const ALL_SERVO_INDEXES = Array.from({ length: SERVO_COUNT }, (_, index) => index);
 
 export function ServoCloseAll({ className, ...props }: Props) {
   const { setServos } = useServoControl();
@@ -29,7 +28,7 @@ export function ServoCloseAll({ className, ...props }: Props) {
   return (
     <WidgetLockableButton
       disabled={isDisabled}
-      className={cn("hover:bg-negative/20", className)}
+      className={cn("hover:bg-negative/20 [writing-mode:vertical-lr]", className)}
       onClick={() => {
         void handleCloseAll();
       }}

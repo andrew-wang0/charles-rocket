@@ -1,8 +1,9 @@
 aiohttp
 adafruit-blinka
 adafruit-circuitpython-ads1x15
-adafruit-circuitpython-hx711
 adafruit-circuitpython-motor
 adafruit-circuitpython-pca9685
+# Requires system libraries: libhx711 and liblgpio.
+hx711-rpi-py
 opencv-python-headless
 websockets
