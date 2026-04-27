@@ -95,6 +95,12 @@ async def serve_video_server() -> None:
     )
     camera_reader.start()
     await site.start()
+    logger.info(
+        "video server listening on http://%s:%s%s",
+        VIDEO_STREAM_HOST,
+        VIDEO_STREAM_PORT,
+        VIDEO_STREAM_PATH,
+    )
 
     try:
         await asyncio.Future()

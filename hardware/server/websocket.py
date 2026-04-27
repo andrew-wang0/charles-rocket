@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import Any, cast
@@ -294,6 +295,13 @@ def track_transition_task(task: asyncio.Task[None]) -> None:
     task.add_done_callback(cleanup)
 
 
+async def start_sensor_samplers() -> None:
+    # Yield once so the video server can bind before any sensor reader threads start.
+    await asyncio.sleep(0)
+    get_pressure_sampler().start()
+    get_load_sampler().start()
+
+
 async def finalize_servo_control(
     websocket: Any,
     transitioned_channels: list[int],
@@ -500,15 +508,21 @@ async def handler(websocket: Any, _path: str | None = None) -> None:
 async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
     logging.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
     initialize_runtime(calibration_set)
-    get_pressure_sampler().start()
-    get_load_sampler().start()
+    sensor_start_task: asyncio.Task[None] | None = None
 
     try:
         async with websockets.serve(handler, HOST, PORT):
+            logging.info("websocket server listening on ws://%s:%s", HOST, PORT)
+            sensor_start_task = asyncio.create_task(start_sensor_samplers())
             await asyncio.Future()
     except asyncio.CancelledError:
         logging.info("server cancelled")
     finally:
+        if sensor_start_task is not None:
+            sensor_start_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sensor_start_task
+
         for task in tuple(transition_tasks):
             task.cancel()
 
