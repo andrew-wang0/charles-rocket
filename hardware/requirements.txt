@@ -3,7 +3,7 @@ adafruit-blinka
 adafruit-circuitpython-ads1x15
 adafruit-circuitpython-motor
 adafruit-circuitpython-pca9685
-RPi.GPIO
+rpi-lgpio
 hx711
 opencv-python-headless
 websockets

@@ -66,7 +66,7 @@ class LoadSampler:
     def _format_init_error(self, exc: Exception) -> str:
         if isinstance(exc, (ImportError, ModuleNotFoundError, OSError)):
             return (
-                f"{exc}. Install `hx711` and ensure `RPi.GPIO` is available "
+                f"{exc}. Install `hx711` and ensure `rpi-lgpio` is installed "
                 "in the hardware virtualenv."
             )
 
