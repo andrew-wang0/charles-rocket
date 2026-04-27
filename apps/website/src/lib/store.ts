@@ -10,6 +10,7 @@ import {
   type LoadChartPoint,
   type PressureChartPoint,
 } from "@/lib/util/chart";
+import { IgnitionState } from "@/types/ignition";
 import { ServoState } from "@/types/servo";
 
 const INITIAL_TIME = -1;
@@ -45,6 +46,9 @@ type Store = {
   ) => void;
 
   readingsStatus: ReadingsStatus;
+
+  ignitionState: IgnitionState;
+  setIgnitionState: (state: IgnitionState) => void;
 
   servoStates: ServoState[];
   setServoState: (index: number, state: ServoState) => void;
@@ -172,6 +176,9 @@ export const useStore = create<Store>((set) => ({
     pressureSensorsOk: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => false),
     loadSensorOk: false,
   },
+
+  ignitionState: IgnitionState.UNKNOWN,
+  setIgnitionState: (ignitionState) => set({ ignitionState }),
 
   servoStates: createInitialServoStates(),
 

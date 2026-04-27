@@ -1,4 +1,4 @@
-import { ignitionControl } from "@/client/router/control/ingnition";
+import { ignitionControl, ignitionState } from "@/client/router/control/ingnition";
 import { servoControl, servoControlMany, servoState } from "@/client/router/control/servo";
 
 export const control = {
@@ -6,4 +6,5 @@ export const control = {
   servoControlMany,
   servoState,
   ignitionControl,
+  ignitionState,
 };

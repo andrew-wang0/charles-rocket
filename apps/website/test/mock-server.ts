@@ -105,6 +105,8 @@ function handleMethod(method: string, params: unknown, id: JsonRpcId) {
       return okResponse(id, servoSnapshot());
     case "ignitionControl":
       return okResponse(id, handleIgnitionControl(params));
+    case "ignitionState":
+      return okResponse(id, ignitionSnapshot());
     case "readings":
       return okResponse(id, handleReadings(params));
     default:
@@ -145,6 +147,12 @@ function handleIgnitionControl(params: unknown) {
 
   return {
     result: "success",
+    state: ignitionState,
+  };
+}
+
+function ignitionSnapshot() {
+  return {
     state: ignitionState,
   };
 }

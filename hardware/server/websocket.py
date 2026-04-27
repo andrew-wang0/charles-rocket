@@ -10,6 +10,7 @@ from websockets.exceptions import ConnectionClosed
 
 from calibration import CalibrationSet
 from config import HOST, PORT, SERVO_CHANNELS
+from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
 from read import LoadSampler, PressureSampler
 
@@ -34,21 +35,21 @@ SERVO_INDEX_BY_CHANNEL = {
 }
 
 servo_controller: ServoController | None = None
+ignition_controller: IgnitionController | None = None
 pressure_sampler: PressureSampler | None = None
 load_sampler: LoadSampler | None = None
-ignition_state = "UNKNOWN"
 clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
 transition_tasks: set[asyncio.Task[None]] = set()
 
 
 def initialize_runtime(calibration_set: CalibrationSet) -> None:
-    global servo_controller, pressure_sampler, load_sampler, ignition_state
+    global servo_controller, ignition_controller, pressure_sampler, load_sampler
 
     servo_controller = ServoController(calibration_set.servo)
+    ignition_controller = IgnitionController()
     pressure_sampler = PressureSampler(calibration_set.pressure)
     load_sampler = LoadSampler(calibration_set.load)
-    ignition_state = "UNKNOWN"
 
 
 def get_servo_controller() -> ServoController:
@@ -70,6 +71,13 @@ def get_load_sampler() -> LoadSampler:
         raise RuntimeError("load sampler not initialized")
 
     return load_sampler
+
+
+def get_ignition_controller() -> IgnitionController:
+    if ignition_controller is None:
+        raise RuntimeError("ignition controller not initialized")
+
+    return ignition_controller
 
 
 def ok(request_id: Any, result: Any) -> dict[str, Any]:
@@ -124,6 +132,10 @@ def build_servo_snapshot() -> dict[str, list[dict[str, Any]]]:
             for channel_state in channels
         ]
     }
+
+
+def build_ignition_snapshot() -> dict[str, Any]:
+    return get_ignition_controller().state_payload()
 
 
 def build_readings_result(include_history: bool = False) -> dict[str, Any]:
@@ -188,6 +200,18 @@ def parse_servo_channels(value: Any) -> list[int]:
     return channels
 
 
+def parse_ignition_target(value: Any) -> IgnitionStableState:
+    normalized = str(value).upper()
+
+    if normalized == "ON":
+        return "ON"
+
+    if normalized == "OFF":
+        return "OFF"
+
+    raise ValueError("Invalid params")
+
+
 async def send_text(websocket: Any, payload: str) -> bool:
     lock = client_send_locks.get(websocket)
     if lock is None:
@@ -225,6 +249,13 @@ async def broadcast_json(payload: Any, *, exclude: Any | None = None) -> None:
 async def broadcast_servo_state(*, exclude: Any | None = None) -> None:
     await broadcast_json(
         notify("servoState", build_servo_snapshot()),
+        exclude=exclude,
+    )
+
+
+async def broadcast_ignition_state(*, exclude: Any | None = None) -> None:
+    await broadcast_json(
+        notify("ignitionState", build_ignition_snapshot()),
         exclude=exclude,
     )
 
@@ -324,17 +355,28 @@ async def handle_servo_control_many(
     return await finalize_servo_control(websocket, transitioned_channels, target_state)
 
 
-def handle_ignition_control(params: Any) -> dict[str, Any]:
-    global ignition_state
-
+async def handle_ignition_control(
+    websocket: Any,
+    params: Any,
+) -> dict[str, Any]:
     if not isinstance(params, dict) or "set" not in params:
         raise ValueError("Invalid params")
 
-    ignition_state = str(params["set"]).upper()
+    try:
+        target_state = parse_ignition_target(params["set"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid params") from exc
+
+    try:
+        state = await get_ignition_controller().set_state(target_state)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    await broadcast_ignition_state(exclude=websocket)
 
     return {
         "result": "success",
-        "state": ignition_state,
+        "state": state,
     }
 
 
@@ -353,7 +395,10 @@ async def dispatch_request(
         return build_servo_snapshot()
 
     if method == "ignitionControl":
-        return handle_ignition_control(params)
+        return await handle_ignition_control(websocket, params)
+
+    if method == "ignitionState":
+        return build_ignition_snapshot()
 
     if method == "readings":
         include_history = isinstance(params, dict) and bool(params.get("history"))
@@ -474,3 +519,5 @@ async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
             pressure_sampler.stop()
         if servo_controller is not None:
             servo_controller.close()
+        if ignition_controller is not None:
+            ignition_controller.close()

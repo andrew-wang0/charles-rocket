@@ -4,6 +4,12 @@ import { createClient } from "@danscan/zod-jsonrpc";
 
 import { router } from "@/client/router";
 import {
+  ignitionControlResult,
+  type IgnitionSnapshot,
+  ignitionSnapshot,
+  ignitionStateNotification,
+} from "@/client/router/control/ingnition";
+import {
   servoControlResult,
   type ServoSnapshot,
   servoSnapshot,
@@ -42,6 +48,10 @@ function applyServoSnapshot(snapshot: ServoSnapshot) {
   useStore.getState().syncServoStates(snapshot.states);
 }
 
+function applyIgnitionSnapshot(snapshot: IgnitionSnapshot) {
+  useStore.getState().setIgnitionState(snapshot.state);
+}
+
 function rejectPending(reason: Error) {
   pending.forEach(({ reject }) => reject(reason));
   pending.clear();
@@ -52,11 +62,42 @@ function isObjectMessage(value: unknown): value is Record<string, unknown> {
 }
 
 function handleNotification(message: unknown) {
-  const parsed = servoStateNotification.safeParse(message);
-  if (!parsed.success) return false;
+  const servo = servoStateNotification.safeParse(message);
+  if (servo.success) {
+    applyServoSnapshot(servo.data.params);
+    return true;
+  }
 
-  applyServoSnapshot(parsed.data.params);
+  const ignition = ignitionStateNotification.safeParse(message);
+  if (!ignition.success) return false;
+
+  applyIgnitionSnapshot(ignition.data.params);
   return true;
+}
+
+function applyKnownResult(result: unknown) {
+  const servoControlResponse = servoControlResult.safeParse(result);
+  if (servoControlResponse.success) {
+    applyServoSnapshot({ states: servoControlResponse.data.states });
+    return;
+  }
+
+  const servoStateResponse = servoSnapshot.safeParse(result);
+  if (servoStateResponse.success) {
+    applyServoSnapshot(servoStateResponse.data);
+    return;
+  }
+
+  const ignitionControlResponse = ignitionControlResult.safeParse(result);
+  if (ignitionControlResponse.success) {
+    applyIgnitionSnapshot(ignitionControlResponse.data);
+    return;
+  }
+
+  const ignitionStateResponse = ignitionSnapshot.safeParse(result);
+  if (ignitionStateResponse.success) {
+    applyIgnitionSnapshot(ignitionStateResponse.data);
+  }
 }
 
 function handleResponse(message: unknown) {
@@ -73,16 +114,7 @@ function handleResponse(message: unknown) {
   if ("error" in message && message.error !== undefined) {
     entry.reject(message.error);
   } else {
-    const servoControlResponse = servoControlResult.safeParse(message.result);
-    if (servoControlResponse.success) {
-      applyServoSnapshot({ states: servoControlResponse.data.states });
-    } else {
-      const servoStateResponse = servoSnapshot.safeParse(message.result);
-      if (servoStateResponse.success) {
-        applyServoSnapshot(servoStateResponse.data);
-      }
-    }
-
+    applyKnownResult(message.result);
     entry.resolve(message);
   }
 
@@ -109,6 +141,11 @@ async function syncServoState() {
   applyServoSnapshot(snapshot);
 }
 
+async function syncIgnitionState() {
+  const snapshot = await client.ignitionState(undefined);
+  applyIgnitionSnapshot(snapshot);
+}
+
 export function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
@@ -120,7 +157,7 @@ export function connect() {
 
   ws.addEventListener("open", () => {
     setState({ status: ConnectionStatus.CONNECTED });
-    void syncServoState().catch(() => {
+    void Promise.all([syncServoState(), syncIgnitionState()]).catch(() => {
       ws?.close();
     });
   });
