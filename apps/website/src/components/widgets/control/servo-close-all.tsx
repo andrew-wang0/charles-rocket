@@ -13,7 +13,7 @@ type Props = React.ComponentProps<typeof WidgetLockableButton>;
 export function ServoCloseAll({ className, ...props }: Props) {
   const { setServos } = useServoControl();
   const servos = useServoGroup(ALL_SERVO_INDEXES);
-  const isDisabled = servos.isSwitching || servos.hasUnknown || servos.areAllClosed;
+  const isDisabled = servos.isSwitching || servos.anyUnknown;
 
   async function handleCloseAll() {
     if (isDisabled) return;
@@ -28,7 +28,10 @@ export function ServoCloseAll({ className, ...props }: Props) {
   return (
     <WidgetLockableButton
       disabled={isDisabled}
-      className={cn("hover:bg-negative/20 [writing-mode:vertical-lr]", className)}
+      className={cn(
+        "hover:bg-destructive/20 hover:text-destructive h-auto self-stretch px-1 py-3 [text-orientation:mixed] [writing-mode:vertical-rl]",
+        className,
+      )}
       onClick={() => {
         void handleCloseAll();
       }}

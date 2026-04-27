@@ -4,6 +4,7 @@ import React from "react";
 
 import { CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { IgnitionControl } from "@/components/widgets/control/ignition-control";
 import { ServoCloseAll } from "@/components/widgets/control/servo-close-all";
 import { ServoManualControlUnit } from "@/components/widgets/control/servo-manual-control-unit";
 import { WidgetCard } from "@/components/widgets/widget-card";
@@ -28,6 +29,7 @@ export function ControlWidget() {
           <ServoManualControlUnit index={1} />
           <ServoManualControlUnit index={2} />
           <Separator orientation="vertical" />
+          <IgnitionControl />
         </CardContent>
       </WidgetCard>
     </WidgetLockProvider>

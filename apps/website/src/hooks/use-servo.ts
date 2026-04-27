@@ -62,9 +62,9 @@ export function useServoGroup(indexes: number[]) {
     return {
       states,
       isSwitching: states.some(isServoSwitching),
-      hasUnknown: states.some((state) => state === ServoState.UNKNOWN),
-      areAllOpen: states.length > 0 && states.every((state) => state === ServoState.OPEN),
-      areAllClosed: states.length > 0 && states.every((state) => state === ServoState.CLOSED),
+      anyUnknown: states.some((state) => state === ServoState.UNKNOWN),
+      allOpen: states.length > 0 && states.every((state) => state === ServoState.OPEN),
+      allClosed: states.length > 0 && states.every((state) => state === ServoState.CLOSED),
     };
   }, [indexes, servoStates]);
 }
