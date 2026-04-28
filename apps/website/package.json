@@ -5,6 +5,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "format": "prettier --write .",
     "lint": "eslint --fix --max-warnings=0",
     "mock:server": "tsx --tsconfig tsconfig.json test/mock-server.ts",
     "start": "next start",

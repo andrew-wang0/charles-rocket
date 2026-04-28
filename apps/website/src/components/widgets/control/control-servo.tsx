@@ -3,7 +3,8 @@
 import React from "react";
 
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
-import { useServo, useServoControl, useServoGroup } from "@/hooks/use-servo";
+import { WidgetNoSignal } from "@/components/widgets/widget-no-signal";
+import { useServo, useServoControl } from "@/hooks/use-servo";
 import { cn } from "@/lib/util/cn";
 import { ServoState } from "@/types/servo";
 
@@ -41,16 +42,12 @@ function ServoStatusCircle({ index }: { index: number }) {
   );
 }
 
-export function ServoManualControlUnit({ indexes, className, ...props }: Props) {
-  const servoGroup = useServoGroup(indexes);
-  const { setServos } = useServoControl();
-  const isDisabled = servoGroup.isSwitching || servoGroup.anyUnknown;
+export function ControlServo({ indexes, className, ...props }: Props) {
+  const servoGroup = useServoControl(indexes);
 
   async function handleSwitch() {
-    if (isDisabled) return;
-
     try {
-      await setServos(indexes, servoGroup.allOpen ? ServoState.CLOSED : ServoState.OPEN);
+      await servoGroup.toggle();
     } catch (error) {
       console.error(
         `Failed to switch servo group ${indexes.map((index) => index + 1).join(", ")}`,
@@ -60,8 +57,11 @@ export function ServoManualControlUnit({ indexes, className, ...props }: Props) 
   }
 
   return (
-    <div className={cn("flex h-full min-w-0 flex-col justify-between", className)} {...props}>
-      <div className="grid h-8 w-full auto-cols-fr grid-flow-col gap-x-2">
+    <div
+      className={cn("flex h-full min-w-0 flex-col justify-between gap-y-2", className)}
+      {...props}
+    >
+      <div className="grid w-full auto-cols-fr grid-flow-col gap-x-2">
         {indexes.map((index) => (
           <p key={index} className="text-center">
             SERVO {index + 1}
@@ -73,15 +73,21 @@ export function ServoManualControlUnit({ indexes, className, ...props }: Props) 
           <ServoStatusCircle key={index} index={index} />
         ))}
       </div>
-      <WidgetLockableButton
-        disabled={isDisabled}
-        className="w-full"
-        onClick={() => {
-          void handleSwitch();
-        }}
-      >
-        SWITCH
-      </WidgetLockableButton>
+      <div className="w-full">
+        {servoGroup.anyUnknown ? (
+          <WidgetNoSignal className="h-8 w-full" />
+        ) : (
+          <WidgetLockableButton
+            className="w-full"
+            onClick={() => {
+              void handleSwitch();
+            }}
+            disabled={servoGroup.isBusy}
+          >
+            SWITCH
+          </WidgetLockableButton>
+        )}
+      </div>
     </div>
   );
 }

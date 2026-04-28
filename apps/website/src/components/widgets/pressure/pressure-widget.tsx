@@ -45,7 +45,7 @@ export function PressureWidget() {
             })}
           </div>
 
-          {!hasPressureData ? <WidgetNoSignal /> : <PressureWidgetChart />}
+          {!hasPressureData ? <WidgetNoSignal className="flex-1" /> : <PressureWidgetChart />}
         </div>
       </CardContent>
     </WidgetCard>

@@ -99,3 +99,7 @@
     @apply font-mono;
   }
 }
+
+html {
+  font-size: 150%;
+}

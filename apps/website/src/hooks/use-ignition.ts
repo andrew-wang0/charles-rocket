@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { client } from "@/client";
 import { useStore } from "@/lib/store";
 import { IgnitionState } from "@/types/ignition";
@@ -18,13 +20,30 @@ export function useIgnition() {
 }
 
 export function useIgnitionControl() {
+  const ignition = useIgnition();
+  const [pending, setPending] = useState(false);
+
   async function setIgnition(targetState: IgnitionTargetState) {
-    await client.ignitionControl({
-      set: targetState,
-    });
+    setPending(true);
+
+    try {
+      await client.ignitionControl({
+        set: targetState,
+      });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function toggle() {
+    if (pending || ignition.isUnknown) return;
+    await setIgnition(ignition.isOn ? IgnitionState.OFF : IgnitionState.ON);
   }
 
   return {
+    ...ignition,
+    isBusy: pending,
+    toggle,
     setIgnition,
   };
 }

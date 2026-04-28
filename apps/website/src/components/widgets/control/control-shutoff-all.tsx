@@ -10,10 +10,10 @@ import { ServoState } from "@/types/servo";
 
 type Props = React.ComponentProps<typeof WidgetLockableButton>;
 
-export function ServoCloseAll({ className, ...props }: Props) {
+export function ControlShutoffAll({ className, ...props }: Props) {
   const { setServos } = useServoControl();
   const servos = useServoGroup(ALL_SERVO_INDEXES);
-  const isDisabled = servos.isSwitching || servos.anyUnknown;
+  const isDisabled = servos.isBusy || servos.anyUnknown;
 
   async function handleCloseAll() {
     if (isDisabled) return;

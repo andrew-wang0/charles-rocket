@@ -29,7 +29,7 @@ export function LoadWidget() {
           onTare={() => {}}
           trackMax
         />
-        {!hasLoadData ? <WidgetNoSignal /> : <LoadWidgetChart />}
+        {!hasLoadData ? <WidgetNoSignal className="flex-1" /> : <LoadWidgetChart />}
       </CardContent>
     </WidgetCard>
   );

@@ -11,6 +11,13 @@ function isServoSwitching(state: ServoState) {
   return state === ServoState.OPENING || state === ServoState.CLOSING;
 }
 
+function getServoAggregateState(states: ServoState[]) {
+  if (states.length === 0) return ServoState.UNKNOWN;
+
+  const firstState = states[0];
+  return states.every((state) => state === firstState) ? firstState : ServoState.UNKNOWN;
+}
+
 function toServoRequestIndex(index: number) {
   const requestIndex = index + 1;
 
@@ -45,6 +52,7 @@ export function useServo(index: number) {
   return useMemo(
     () => ({
       state,
+      isBusy: isServoSwitching(state),
       isSwitching: isServoSwitching(state),
       isOpen: state === ServoState.OPEN,
       isClosed: state === ServoState.CLOSED,
@@ -61,6 +69,8 @@ export function useServoGroup(indexes: number[]) {
 
     return {
       states,
+      state: getServoAggregateState(states),
+      isBusy: states.some(isServoSwitching),
       isSwitching: states.some(isServoSwitching),
       anyUnknown: states.some((state) => state === ServoState.UNKNOWN),
       allOpen: states.length > 0 && states.every((state) => state === ServoState.OPEN),
@@ -69,7 +79,9 @@ export function useServoGroup(indexes: number[]) {
   }, [indexes, servoStates]);
 }
 
-export function useServoControl() {
+export function useServoControl(indexes: number[] = []) {
+  const servoGroup = useServoGroup(indexes);
+
   async function setServos(indexes: number[], targetState: ServoTargetState) {
     const requestIndexes = toServoRequestIndexes(indexes);
 
@@ -95,7 +107,15 @@ export function useServoControl() {
     await setServos([index], targetState);
   }
 
+  async function toggle() {
+    if (indexes.length === 0 || servoGroup.anyUnknown || servoGroup.isBusy) return;
+    await setServos(indexes, servoGroup.allOpen ? ServoState.CLOSED : ServoState.OPEN);
+  }
+
   return {
+    ...servoGroup,
+    isBusy: servoGroup.isBusy,
+    toggle,
     setServo,
     setServos,
   };
