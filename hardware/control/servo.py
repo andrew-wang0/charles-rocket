@@ -78,8 +78,8 @@ class ServoController:
                 "servo hardware ready: address=0x%02x frequency=%sHz closed=%s open=%s",
                 PCA9685_I2C_ADDRESS,
                 PCA9685_PWM_FREQUENCY,
-                SERVO_CLOSED_ANGLE,
-                SERVO_OPEN_ANGLE,
+                self._close_angles,
+                self._open_angles,
             )
         except Exception as exc:
             self.error = str(exc)
@@ -132,6 +132,11 @@ class ServoController:
         self._angles[channel] = angle
         logger.info("servo angle set: channel=%s target=%s angle=%s", channel, target_state, angle)
 
+    def _set_manual_angle_sync(self, channel: int, angle: float) -> None:
+        self._servos[channel].angle = angle
+        self._angles[channel] = angle
+        logger.info("servo angle set: channel=%s target=manual angle=%s", channel, angle)
+
     def _set_startup_state(self) -> None:
         for channel in SERVO_CHANNELS:
             self._set_angle_sync(channel, "closed")
@@ -150,6 +155,23 @@ class ServoController:
             self._validate_channel(channel)
             self._ensure_available()
             return await self._start_transitions([channel], target_state)
+
+    async def set_servo_angle(self, channel: int, angle: float) -> None:
+        async with self._lock:
+            self._validate_channel(channel)
+            self._ensure_available()
+
+            current_state = self._states[channel]
+            if current_state in ("opening", "closing"):
+                raise ValueError("servo_busy")
+
+            try:
+                await asyncio.to_thread(self._set_manual_angle_sync, channel, angle)
+            except Exception as exc:
+                logger.exception("failed to move servo channel=%s angle=%s", channel, angle)
+                raise ValueError("servo_hardware_error") from exc
+
+            self._states[channel] = "unknown"
 
     async def set_servos(self, channels: list[int], target_state: ServoStableState) -> list[int]:
         async with self._lock:

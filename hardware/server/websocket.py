@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 from typing import Any, cast
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 
 from calibration import CalibrationSet
-from config import HOST, PORT, PRESSURE_TRANSDUCER_COUNT, SERVO_CHANNELS
+from config import HOST, PORT, PRESSURE_TRANSDUCER_COUNT, SERVO_ACTUATION_RANGE, SERVO_CHANNELS
 from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
 from read import LoadSampler, PressureSampler
@@ -227,6 +228,15 @@ def parse_servo_channels(value: Any) -> list[int]:
         channels.append(channel)
 
     return channels
+
+
+def parse_servo_angle(value: Any) -> float:
+    angle = float(value)
+
+    if not math.isfinite(angle) or angle < 0 or angle > SERVO_ACTUATION_RANGE:
+        raise ValueError("Invalid params")
+
+    return angle
 
 
 def parse_ignition_target(value: Any) -> IgnitionStableState:
@@ -474,6 +484,35 @@ async def handle_servo_control_many(
     return await finalize_servo_control(websocket, transitioned_channels, target_state)
 
 
+async def handle_servo_set_angle(
+    websocket: Any,
+    params: Any,
+) -> dict[str, Any]:
+    if not isinstance(params, dict):
+        raise ValueError("Invalid params")
+
+    try:
+        channel = parse_servo_channel(params["index"])
+        angle = parse_servo_angle(params["angle"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid params") from exc
+
+    try:
+        await get_servo_controller().set_servo_angle(channel, angle)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    snapshot = build_servo_snapshot()
+    await broadcast_servo_state(exclude=websocket)
+
+    return {
+        "result": "success",
+        "index": SERVO_INDEX_BY_CHANNEL[channel],
+        "angle": angle,
+        **snapshot,
+    }
+
+
 async def handle_ignition_control(
     websocket: Any,
     params: Any,
@@ -509,6 +548,9 @@ async def dispatch_request(
 
     if method == "servoControlMany":
         return await handle_servo_control_many(websocket, params)
+
+    if method == "servoSetAngle":
+        return await handle_servo_set_angle(websocket, params)
 
     if method == "servoState":
         return build_servo_snapshot()
