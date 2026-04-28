@@ -20,6 +20,7 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_CONSECUTIVE_READ_FAILURES = 5
 
 
 class LoadSampler:
@@ -33,6 +34,7 @@ class LoadSampler:
         self._hx: Any | None = None
         self._gpio: Any | None = None
         self._sensor_ok = False
+        self._consecutive_failures = 0
         self._buffer: deque[tuple[int, float]] = deque()
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "load-cell"
         self._data_file: TextIO | None = None
@@ -143,11 +145,27 @@ class LoadSampler:
             try:
                 timestamp_ms = int(time.time() * 1000)
                 pounds = max(0.0, self._read_weight())
+                self._consecutive_failures = 0
                 self._record_sample(timestamp_ms, pounds)
-            except Exception:
-                logger.exception("failed to record load sample")
+            except Exception as exc:
+                self._consecutive_failures += 1
                 with self._lock:
                     self._sensor_ok = False
+
+                if self._consecutive_failures >= MAX_CONSECUTIVE_READ_FAILURES:
+                    self.available = False
+                    logger.exception(
+                        "disabling load sampler after %s consecutive read failures",
+                        self._consecutive_failures,
+                    )
+                    return
+
+                logger.exception(
+                    "failed to record load sample (%s/%s): %s",
+                    self._consecutive_failures,
+                    MAX_CONSECUTIVE_READ_FAILURES,
+                    type(exc).__name__,
+                )
                 time.sleep(0.05)
 
     def _read_weight(self) -> float:
