@@ -10,7 +10,7 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 from calibration import CalibrationSet
-from config import HOST, PORT, SERVO_CHANNELS
+from config import HOST, PORT, PRESSURE_TRANSDUCER_COUNT, SERVO_CHANNELS
 from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
 from read import LoadSampler, PressureSampler
@@ -44,13 +44,14 @@ client_send_locks: dict[Any, asyncio.Lock] = {}
 transition_tasks: set[asyncio.Task[None]] = set()
 
 
-def initialize_runtime(calibration_set: CalibrationSet) -> None:
-    global servo_controller, ignition_controller, pressure_sampler, load_sampler
-
+def initialize_control_runtime(calibration_set: CalibrationSet) -> None:
+    global servo_controller, ignition_controller
     servo_controller = ServoController(calibration_set.servo)
     ignition_controller = IgnitionController()
-    pressure_sampler = PressureSampler(calibration_set.pressure)
-    load_sampler = LoadSampler(calibration_set.load)
+
+
+def build_empty_pressure_payload() -> list[list[dict[str, float | int]]]:
+    return [[] for _ in range(PRESSURE_TRANSDUCER_COUNT)]
 
 
 def get_servo_controller() -> ServoController:
@@ -141,25 +142,39 @@ def build_ignition_snapshot() -> dict[str, Any]:
 
 def build_readings_result(include_history: bool = False) -> dict[str, Any]:
     servo = get_servo_controller()
-    pressure = get_pressure_sampler()
-    load = get_load_sampler()
 
     return {
         "status": {
             "servoControllerOk": servo.available,
-            "pressureSensorsOk": pressure.status_payload(),
-            "loadSensorOk": load.status_payload(),
+            "pressureSensorsOk": (
+                pressure_sampler.status_payload()
+                if pressure_sampler is not None
+                else [False] * PRESSURE_TRANSDUCER_COUNT
+            ),
+            "loadSensorOk": (
+                load_sampler.status_payload()
+                if load_sampler is not None
+                else False
+            ),
         },
         "data": {
             "load": (
-                load.history_payload()
-                if include_history
-                else load.latest_payload()
+                (
+                    load_sampler.history_payload()
+                    if include_history
+                    else load_sampler.latest_payload()
+                )
+                if load_sampler is not None
+                else []
             ),
             "pressure": (
-                pressure.history_payload()
-                if include_history
-                else pressure.latest_payload()
+                (
+                    pressure_sampler.history_payload()
+                    if include_history
+                    else pressure_sampler.latest_payload()
+                )
+                if pressure_sampler is not None
+                else build_empty_pressure_payload()
             ),
         },
     }
@@ -295,11 +310,18 @@ def track_transition_task(task: asyncio.Task[None]) -> None:
     task.add_done_callback(cleanup)
 
 
-async def start_sensor_samplers() -> None:
-    # Yield once so the video server can bind before any sensor reader threads start.
-    await asyncio.sleep(0)
-    get_pressure_sampler().start()
-    get_load_sampler().start()
+def initialize_sensor_runtime_sync(calibration_set: CalibrationSet) -> tuple[PressureSampler, LoadSampler]:
+    return PressureSampler(calibration_set.pressure), LoadSampler(calibration_set.load)
+
+
+async def initialize_and_start_sensor_samplers(calibration_set: CalibrationSet) -> None:
+    global pressure_sampler, load_sampler
+
+    pressure, load = await asyncio.to_thread(initialize_sensor_runtime_sync, calibration_set)
+    pressure_sampler = pressure
+    load_sampler = load
+    pressure_sampler.start()
+    load_sampler.start()
 
 
 async def finalize_servo_control(
@@ -507,13 +529,15 @@ async def handler(websocket: Any, _path: str | None = None) -> None:
 
 async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
     logging.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
-    initialize_runtime(calibration_set)
+    initialize_control_runtime(calibration_set)
     sensor_start_task: asyncio.Task[None] | None = None
 
     try:
         async with websockets.serve(handler, HOST, PORT):
             logging.info("websocket server listening on ws://%s:%s", HOST, PORT)
-            sensor_start_task = asyncio.create_task(start_sensor_samplers())
+            sensor_start_task = asyncio.create_task(
+                initialize_and_start_sensor_samplers(calibration_set)
+            )
             await asyncio.Future()
     except asyncio.CancelledError:
         logging.info("server cancelled")
