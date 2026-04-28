@@ -4,11 +4,12 @@ import React from "react";
 
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { loadChartConfig, LoadWidgetChart } from "@/components/widgets/load/load-widget-chart";
-import { WidgetAwaitingData } from "@/components/widgets/widget-awaiting-data";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { WidgetChartValueCard } from "@/components/widgets/widget-chart-value-card";
 import { useStore } from "@/lib/store";
 import { formatChartValue } from "@/lib/util/chart";
+
+import { WidgetNoSignal } from "../widget-no-signal";
 
 export function LoadWidget() {
   const hasLoadData = useStore((store) => store.loadChartData.length > 0);
@@ -28,7 +29,7 @@ export function LoadWidget() {
           onTare={() => {}}
           trackMax
         />
-        {!hasLoadData ? <WidgetAwaitingData /> : <LoadWidgetChart />}
+        {!hasLoadData ? <WidgetNoSignal /> : <LoadWidgetChart />}
       </CardContent>
     </WidgetCard>
   );

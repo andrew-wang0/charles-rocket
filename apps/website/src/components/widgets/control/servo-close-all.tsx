@@ -37,7 +37,7 @@ export function ServoCloseAll({ className, ...props }: Props) {
       }}
       {...props}
     >
-      CLOSE ALL
+      SHUTOFF ALL
     </WidgetLockableButton>
   );
 }

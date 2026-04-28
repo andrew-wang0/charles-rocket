@@ -21,15 +21,16 @@ export function ControlWidget() {
             <WidgetLockToggleButton />
           </CardAction>
         </CardHeader>
-        <CardContent className="flex flex-1 gap-x-2">
+        <CardContent className="flex size-full gap-x-2">
           <ServoCloseAll />
           <Separator orientation="vertical" />
-          <ServoManualControlUnit index={0} />
-          <Separator orientation="vertical" />
-          <ServoManualControlUnit index={1} />
-          <ServoManualControlUnit index={2} />
-          <Separator orientation="vertical" />
-          <IgnitionControl />
+          <div className="flex w-full gap-x-2">
+            <ServoManualControlUnit indexes={[0]} className="w-1/3" />
+            <Separator orientation="vertical" />
+            <IgnitionControl className="w-1/3" />
+            <Separator orientation="vertical" />
+            <ServoManualControlUnit indexes={[1, 2]} className="w-1/3" />
+          </div>
         </CardContent>
       </WidgetCard>
     </WidgetLockProvider>

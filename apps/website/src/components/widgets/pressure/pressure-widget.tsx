@@ -7,11 +7,12 @@ import {
   chartConfig,
   PressureWidgetChart,
 } from "@/components/widgets/pressure/pressure-widget-chart";
-import { WidgetAwaitingData } from "@/components/widgets/widget-awaiting-data";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { WidgetChartValueCard } from "@/components/widgets/widget-chart-value-card";
 import { useStore } from "@/lib/store";
 import { formatChartValue } from "@/lib/util/chart";
+
+import { WidgetNoSignal } from "../widget-no-signal";
 
 export function PressureWidget() {
   const hasPressureData = useStore((store) => store.pressureChartData.length > 0);
@@ -44,7 +45,7 @@ export function PressureWidget() {
             })}
           </div>
 
-          {!hasPressureData ? <WidgetAwaitingData /> : <PressureWidgetChart />}
+          {!hasPressureData ? <WidgetNoSignal /> : <PressureWidgetChart />}
         </div>
       </CardContent>
     </WidgetCard>

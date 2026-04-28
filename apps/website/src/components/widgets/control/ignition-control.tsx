@@ -55,6 +55,7 @@ export function IgnitionControl({ className, ...props }: Props) {
         onClick={() => {
           void handleSwitch();
         }}
+        className="w-full"
       >
         SWITCH
       </WidgetLockableButton>
