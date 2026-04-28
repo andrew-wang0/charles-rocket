@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 from typing import Any, cast
@@ -19,6 +18,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 JSONRPC_VERSION = "2.0"
 PARSE_ERROR = -32700
@@ -42,12 +42,25 @@ load_sampler: LoadSampler | None = None
 clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
 transition_tasks: set[asyncio.Task[None]] = set()
+startup_tasks: set[asyncio.Task[None]] = set()
 
 
 def initialize_control_runtime(calibration_set: CalibrationSet) -> None:
     global servo_controller, ignition_controller
     servo_controller = ServoController(calibration_set.servo)
     ignition_controller = IgnitionController()
+
+    if not servo_controller.available:
+        logger.warning(
+            "servo controller unavailable: %s",
+            servo_controller.error or "unknown_error",
+        )
+
+    if not ignition_controller.available:
+        logger.warning(
+            "ignition controller unavailable: %s",
+            ignition_controller.error or "unknown_error",
+        )
 
 
 def build_empty_pressure_payload() -> list[list[dict[str, float | int]]]:
@@ -284,44 +297,120 @@ async def finish_servo_transition(
         await get_servo_controller().finish_transitions(channels, target_state)
         await broadcast_servo_state()
     except Exception:
-        logging.exception(
+        logger.exception(
             "failed to finish servo transition: channels=%s target=%s",
             channels,
             target_state,
         )
 
 
-def track_transition_task(task: asyncio.Task[None]) -> None:
-    transition_tasks.add(task)
+def track_background_task(
+    task: asyncio.Task[None],
+    task_set: set[asyncio.Task[None]],
+    label: str,
+) -> None:
+    task_set.add(task)
 
     def cleanup(done: asyncio.Task[None]) -> None:
-        transition_tasks.discard(done)
+        task_set.discard(done)
 
         if done.cancelled():
             return
 
         exception = done.exception()
         if exception is not None:
-            logging.error(
-                "background servo task failed",
+            logger.error(
+                "%s failed",
+                label,
                 exc_info=(type(exception), exception, exception.__traceback__),
             )
 
     task.add_done_callback(cleanup)
 
 
-def initialize_sensor_runtime_sync(calibration_set: CalibrationSet) -> tuple[PressureSampler, LoadSampler]:
-    return PressureSampler(calibration_set.pressure), LoadSampler(calibration_set.load)
+def track_transition_task(task: asyncio.Task[None]) -> None:
+    track_background_task(task, transition_tasks, "background servo task")
 
 
-async def initialize_and_start_sensor_samplers(calibration_set: CalibrationSet) -> None:
-    global pressure_sampler, load_sampler
+def track_startup_task(task: asyncio.Task[None], label: str) -> None:
+    track_background_task(task, startup_tasks, label)
 
-    pressure, load = await asyncio.to_thread(initialize_sensor_runtime_sync, calibration_set)
-    pressure_sampler = pressure
-    load_sampler = load
-    pressure_sampler.start()
-    load_sampler.start()
+
+async def initialize_sampler(
+    sampler_type: type[PressureSampler] | type[LoadSampler],
+    calibration: Any,
+    label: str,
+) -> PressureSampler | LoadSampler | None:
+    try:
+        sampler = await asyncio.to_thread(sampler_type, calibration)
+        sampler.start()
+        if not sampler.available:
+            logger.warning("%s sampler unavailable: %s", label, sampler.error or "unknown_error")
+        return sampler
+    except Exception:
+        logger.exception("failed to start %s sampler", label)
+        return None
+
+
+async def initialize_pressure_sampler(calibration: Any) -> None:
+    global pressure_sampler
+
+    pressure = await initialize_sampler(PressureSampler, calibration, "pressure")
+    pressure_sampler = cast(PressureSampler | None, pressure)
+
+
+async def initialize_load_sampler(calibration: Any) -> None:
+    global load_sampler
+
+    load = await initialize_sampler(LoadSampler, calibration, "load")
+    load_sampler = cast(LoadSampler | None, load)
+
+
+def start_sensor_startup_tasks(calibration_set: CalibrationSet) -> None:
+    track_startup_task(
+        asyncio.create_task(initialize_pressure_sampler(calibration_set.pressure)),
+        "pressure startup task",
+    )
+    track_startup_task(
+        asyncio.create_task(initialize_load_sampler(calibration_set.load)),
+        "load startup task",
+    )
+
+
+def stop_runtime_component(component: Any, action: str, label: str) -> None:
+    if component is None:
+        return
+
+    try:
+        getattr(component, action)()
+    except Exception:
+        logger.exception("failed to %s %s", action, label)
+
+
+async def shutdown_runtime() -> None:
+    global servo_controller, ignition_controller, pressure_sampler, load_sampler
+
+    for task in tuple(startup_tasks):
+        task.cancel()
+
+    await asyncio.gather(*startup_tasks, return_exceptions=True)
+    startup_tasks.clear()
+
+    for task in tuple(transition_tasks):
+        task.cancel()
+
+    await asyncio.gather(*transition_tasks, return_exceptions=True)
+    transition_tasks.clear()
+
+    stop_runtime_component(load_sampler, "stop", "load sampler")
+    stop_runtime_component(pressure_sampler, "stop", "pressure sampler")
+    stop_runtime_component(servo_controller, "close", "servo controller")
+    stop_runtime_component(ignition_controller, "close", "ignition controller")
+
+    load_sampler = None
+    pressure_sampler = None
+    servo_controller = None
+    ignition_controller = None
 
 
 async def finalize_servo_control(
@@ -467,7 +556,7 @@ async def handle_request_payload(
             return None
         return err(request_id, SERVER_ERROR, str(exc))
     except Exception as exc:
-        logging.exception("unhandled rpc error: method=%s", method)
+        logger.exception("unhandled rpc error: method=%s", method)
         if not should_respond:
             return None
         return err(request_id, INTERNAL_ERROR, "Internal error", {"message": str(exc)})
@@ -521,41 +610,22 @@ async def handler(websocket: Any, _path: str | None = None) -> None:
             if exc.rcvd is not None and exc.rcvd.reason
             else getattr(websocket, "close_reason", None) or "none"
         )
-        logging.info("connection closed: code=%s reason=%s", close_code, close_reason)
+        logger.info("connection closed: code=%s reason=%s", close_code, close_reason)
     finally:
         clients.discard(websocket)
         client_send_locks.pop(websocket, None)
 
 
 async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
-    logging.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
+    logger.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
     initialize_control_runtime(calibration_set)
-    sensor_start_task: asyncio.Task[None] | None = None
 
     try:
         async with websockets.serve(handler, HOST, PORT):
-            logging.info("websocket server listening on ws://%s:%s", HOST, PORT)
-            sensor_start_task = asyncio.create_task(
-                initialize_and_start_sensor_samplers(calibration_set)
-            )
+            logger.info("websocket server listening on ws://%s:%s", HOST, PORT)
+            start_sensor_startup_tasks(calibration_set)
             await asyncio.Future()
     except asyncio.CancelledError:
-        logging.info("server cancelled")
+        logger.info("server cancelled")
     finally:
-        if sensor_start_task is not None:
-            sensor_start_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await sensor_start_task
-
-        for task in tuple(transition_tasks):
-            task.cancel()
-
-        await asyncio.gather(*transition_tasks, return_exceptions=True)
-        if load_sampler is not None:
-            load_sampler.stop()
-        if pressure_sampler is not None:
-            pressure_sampler.stop()
-        if servo_controller is not None:
-            servo_controller.close()
-        if ignition_controller is not None:
-            ignition_controller.close()
+        await shutdown_runtime()

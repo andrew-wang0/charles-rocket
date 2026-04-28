@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from typing import cast
 
 from aiohttp import web
 
@@ -12,10 +13,14 @@ from read import CameraReader
 logger = logging.getLogger(__name__)
 
 BOUNDARY = "frame"
-camera_reader = CameraReader()
+CAMERA_READER_APP_KEY = "camera_reader"
 
 
-async def wait_for_frame(timeout_seconds: float) -> bytes | None:
+def get_camera_reader(request: web.Request) -> CameraReader:
+    return cast(CameraReader, request.app[CAMERA_READER_APP_KEY])
+
+
+async def wait_for_frame(camera_reader: CameraReader, timeout_seconds: float) -> bytes | None:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
 
     while asyncio.get_running_loop().time() < deadline:
@@ -27,8 +32,9 @@ async def wait_for_frame(timeout_seconds: float) -> bytes | None:
     return None
 
 
-async def camera_stream(_request: web.Request) -> web.StreamResponse:
-    frame = await wait_for_frame(timeout_seconds=1.0)
+async def camera_stream(request: web.Request) -> web.StreamResponse:
+    camera_reader = get_camera_reader(request)
+    frame = await wait_for_frame(camera_reader, timeout_seconds=1.0)
     if frame is None:
         raise web.HTTPServiceUnavailable(text="NO VIDEO SIGNAL")
 
@@ -41,7 +47,7 @@ async def camera_stream(_request: web.Request) -> web.StreamResponse:
             "Connection": "close",
         },
     )
-    await response.prepare(_request)
+    await response.prepare(request)
 
     last_frame_time = -1
     frame_interval = 1 / VIDEO_STREAM_FPS
@@ -80,7 +86,12 @@ async def camera_stream(_request: web.Request) -> web.StreamResponse:
 
 
 async def serve_video_server() -> None:
+    camera_reader = CameraReader()
+    if not camera_reader.available:
+        logger.warning("camera reader unavailable: %s", camera_reader.error or "unknown_error")
+
     app = web.Application()
+    app[CAMERA_READER_APP_KEY] = camera_reader
     app.router.add_get(VIDEO_STREAM_PATH, camera_stream)
 
     runner = web.AppRunner(app)
