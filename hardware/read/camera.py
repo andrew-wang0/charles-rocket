@@ -13,7 +13,6 @@ from config import (
     VIDEO_DEVICE_PATH,
     VIDEO_FRAME_HEIGHT,
     VIDEO_FRAME_WIDTH,
-    VIDEO_JPEG_QUALITY,
     VIDEO_RETRY_SECONDS,
 )
 
@@ -72,6 +71,49 @@ class CameraReader:
         with self._lock:
             return self._last_frame_time_ms
 
+    def _fourcc_to_string(self, value: float) -> str:
+        try:
+            code = int(value)
+        except (TypeError, ValueError):
+            return "unknown"
+
+        if code <= 0:
+            return "unknown"
+
+        return "".join(chr((code >> (8 * offset)) & 0xFF) for offset in range(4))
+
+    def _enable_mjpeg_passthrough(self, capture: Any) -> None:
+        convert_rgb_prop = getattr(self._cv2, "CAP_PROP_CONVERT_RGB", None)
+        if convert_rgb_prop is not None:
+            capture.set(convert_rgb_prop, 0)
+
+        format_prop = getattr(self._cv2, "CAP_PROP_FORMAT", None)
+        if format_prop is not None:
+            capture.set(format_prop, -1)
+
+    def _extract_direct_jpeg(self, frame: Any) -> bytes | None:
+        if not hasattr(frame, "tobytes"):
+            return None
+
+        frame_bytes = frame.tobytes()
+        if len(frame_bytes) < 4:
+            return None
+
+        if frame_bytes[:2] != b"\xff\xd8" or frame_bytes[-2:] != b"\xff\xd9":
+            return None
+
+        return frame_bytes
+
+    def _extract_mjpeg_frame(self, frame: Any) -> bytes:
+        direct_jpeg = self._extract_direct_jpeg(frame)
+        if direct_jpeg is not None:
+            return direct_jpeg
+
+        raise RuntimeError(
+            "camera_mjpeg_passthrough_unavailable:"
+            "backend did not return encoded JPEG frames"
+        )
+
     def _open_capture(self) -> bool:
         if self._cv2 is None:
             return False
@@ -96,9 +138,17 @@ class CameraReader:
         if buffer_size_prop is not None:
             capture.set(buffer_size_prop, VIDEO_CAPTURE_BUFFER_SIZE)
 
+        self._enable_mjpeg_passthrough(capture)
+
         self._capture = capture
+
+        actual_fourcc = self._fourcc_to_string(capture.get(self._cv2.CAP_PROP_FOURCC))
+        actual_format = capture.get(getattr(self._cv2, "CAP_PROP_FORMAT", self._cv2.CAP_PROP_FOURCC))
         logger.info(
-            "camera ready: device=%s requested=%sx%s@%sfps actual=%sx%s@%.2ffps",
+            (
+                "camera ready: device=%s requested=%sx%s@%sfps actual=%sx%s@%.2ffps "
+                "codec=%s passthrough=enabled format=%s"
+            ),
             VIDEO_DEVICE_PATH,
             VIDEO_FRAME_WIDTH,
             VIDEO_FRAME_HEIGHT,
@@ -106,6 +156,8 @@ class CameraReader:
             int(capture.get(self._cv2.CAP_PROP_FRAME_WIDTH)),
             int(capture.get(self._cv2.CAP_PROP_FRAME_HEIGHT)),
             capture.get(self._cv2.CAP_PROP_FPS),
+            actual_fourcc,
+            actual_format,
         )
         return True
 
@@ -131,17 +183,11 @@ class CameraReader:
                 if not ok:
                     raise RuntimeError("camera_read_failed")
 
-                encoded_ok, encoded = self._cv2.imencode(
-                    ".jpg",
-                    frame,
-                    [int(self._cv2.IMWRITE_JPEG_QUALITY), VIDEO_JPEG_QUALITY],
-                )
-                if not encoded_ok:
-                    raise RuntimeError("camera_encode_failed")
+                encoded = self._extract_mjpeg_frame(frame)
 
                 now_ms = int(time.time() * 1000)
                 with self._lock:
-                    self._latest_frame = encoded.tobytes()
+                    self._latest_frame = encoded
                     self._last_frame_time_ms = now_ms
             except Exception as exc:
                 self.error = str(exc)
@@ -150,4 +196,6 @@ class CameraReader:
                     self._latest_frame = None
                     self._last_frame_time_ms = 0
                 self._close_capture()
+                if "camera_mjpeg_passthrough_unavailable" in self.error:
+                    return
                 time.sleep(VIDEO_RETRY_SECONDS)
