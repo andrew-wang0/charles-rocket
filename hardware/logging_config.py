@@ -1,0 +1,95 @@
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any
+
+HX711_TIMING_WARNING_PREFIX = "setting gain and channel took more than 60µs."
+
+_configured = False
+
+
+class SuppressRepeatedHx711WarningFilter(logging.Filter):
+    def __init__(self) -> None:
+        super().__init__()
+        self._has_emitted = False
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno != logging.WARNING:
+            return True
+
+        message = record.getMessage()
+        if not message.startswith(HX711_TIMING_WARNING_PREFIX):
+            return True
+
+        if self._has_emitted:
+            return False
+
+        self._has_emitted = True
+        record.msg = "HX711 timing warning (future repeats suppressed): %s"
+        record.args = (message,)
+        return True
+
+
+class PrettyColorFormatter(logging.Formatter):
+    RESET = "\x1b[0m"
+    DIM = "\x1b[2m"
+    COLORS = {
+        logging.DEBUG: "\x1b[36m",
+        logging.INFO: "\x1b[32m",
+        logging.WARNING: "\x1b[33m",
+        logging.ERROR: "\x1b[31m",
+        logging.CRITICAL: "\x1b[35;1m",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        timestamp = self.formatTime(record, self.datefmt)
+        level_color = self.COLORS.get(record.levelno, "")
+        level = f"{record.levelname:8}"
+        logger_name = record.name
+        message = record.getMessage()
+
+        formatted = (
+            f"{self.DIM}{timestamp}{self.RESET} "
+            f"{level_color}{level}{self.RESET} "
+            f"{self.DIM}{logger_name}{self.RESET} "
+            f"{message}"
+        )
+
+        if record.exc_info:
+            formatted = f"{formatted}\n{self.formatException(record.exc_info)}"
+
+        if record.stack_info:
+            formatted = f"{formatted}\n{self.formatStack(record.stack_info)}"
+
+        return formatted
+
+
+def should_use_color(stream: Any) -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+
+    is_a_tty = getattr(stream, "isatty", None)
+    return bool(is_a_tty and is_a_tty())
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    global _configured
+
+    if _configured:
+        return
+
+    handler = logging.StreamHandler()
+    handler.addFilter(SuppressRepeatedHx711WarningFilter())
+
+    if should_use_color(handler.stream):
+        handler.setFormatter(PrettyColorFormatter())
+    else:
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(level)
+    root_logger.addHandler(handler)
+
+    _configured = True

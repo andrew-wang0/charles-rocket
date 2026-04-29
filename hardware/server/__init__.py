@@ -3,6 +3,7 @@ import contextlib
 import logging
 
 from calibration import load_calibration_set
+from logging_config import setup_logging
 from .video import serve_video_server
 from .websocket import serve_websocket_server
 
@@ -20,6 +21,7 @@ async def run_service(name: str, task: asyncio.Task[None]) -> None:
 
 
 async def main() -> None:
+    setup_logging()
     calibration_set = load_calibration_set()
     services = {
         "websocket": asyncio.create_task(serve_websocket_server(calibration_set)),

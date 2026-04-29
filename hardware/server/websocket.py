@@ -15,10 +15,6 @@ from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
 from read import LoadSampler, PressureSampler
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 JSONRPC_VERSION = "2.0"
