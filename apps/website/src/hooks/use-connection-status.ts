@@ -2,7 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
-import { connect, ConnectionStatus, status, subscribe } from "@/client";
+import { connect, connectionGeneration, ConnectionStatus, status, subscribe } from "@/client";
 
 function getSnapshot() {
   return status;
@@ -18,4 +18,24 @@ export function useConnectionStatus() {
   }, []);
 
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+function getConnectionGenerationSnapshot() {
+  return connectionGeneration;
+}
+
+function getConnectionGenerationServerSnapshot() {
+  return 0;
+}
+
+export function useConnectionGeneration() {
+  useEffect(() => {
+    connect();
+  }, []);
+
+  return useSyncExternalStore(
+    subscribe,
+    getConnectionGenerationSnapshot,
+    getConnectionGenerationServerSnapshot,
+  );
 }
