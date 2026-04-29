@@ -2,11 +2,10 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
-import { connect, ConnectionStatus, subscribe } from "@/client";
+import { connect, ConnectionStatus, status, subscribe } from "@/client";
 
 function getSnapshot() {
-  // return status;
-  return ConnectionStatus.CONNECTED;
+  return status;
 }
 
 function getServerSnapshot() {
