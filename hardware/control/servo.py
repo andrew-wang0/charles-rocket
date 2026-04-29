@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib
-import json
 import logging
 import sys
 from pathlib import Path
@@ -24,7 +23,6 @@ from config import (
 
 logger = logging.getLogger(__name__)
 RASPBERRY_PI_SYSTEM_PACKAGES = Path("/usr/lib/python3/dist-packages")
-SERVO_STATE_FILE = Path(__file__).resolve().parents[1] / "data" / "servo" / "state.json"
 
 ServoStableState = Literal["open", "closed"]
 ServoTransitionState = Literal["opening", "closing"]
@@ -35,11 +33,6 @@ ServoState = ServoStableState | ServoTransitionState | ServoUnknownState
 class ServoChannelState(TypedDict):
     channel: int
     state: ServoState
-
-
-class PersistedServoChannelState(TypedDict):
-    channel: int
-    state: ServoStableState | ServoUnknownState
 
 
 class ServoController:
@@ -79,7 +72,7 @@ class ServoController:
                     actuation_range=SERVO_ACTUATION_RANGE,
                 )
 
-            self._restore_startup_state()
+            self._set_startup_state()
             self.available = True
             logger.info(
                 "servo hardware ready: address=0x%02x frequency=%sHz closed=%s open=%s",
@@ -144,82 +137,10 @@ class ServoController:
         self._angles[channel] = angle
         logger.info("servo angle set: channel=%s target=manual angle=%s", channel, angle)
 
-    def _persistable_state(self, state: ServoState) -> ServoStableState | ServoUnknownState:
-        return state if state in ("open", "closed", "unknown") else "unknown"
-
-    def _persist_states(self) -> None:
-        payload = {
-            "channels": [
-                {
-                    "channel": channel,
-                    "state": self._persistable_state(self._states[channel]),
-                }
-                for channel in SERVO_CHANNELS
-            ]
-        }
-
-        try:
-            SERVO_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            SERVO_STATE_FILE.write_text(json.dumps(payload), encoding="utf-8")
-        except Exception:
-            logger.exception("failed to persist servo state")
-
-    def _parse_persisted_state_entry(
-        self,
-        entry: object,
-    ) -> PersistedServoChannelState | None:
-        if not isinstance(entry, dict):
-            return None
-
-        channel = entry.get("channel")
-        if not isinstance(channel, int) or channel not in SERVO_CHANNELS:
-            return None
-
-        state = entry.get("state")
-        if state == "open" or state == "closed" or state == "unknown":
-            restored_entry: PersistedServoChannelState = {
-                "channel": channel,
-                "state": state,
-            }
-            return restored_entry
-
-        return None
-
-    def _restore_startup_state(self) -> None:
-        if not SERVO_STATE_FILE.exists():
-            logger.warning("servo startup state unavailable: no persisted state file")
-            return
-
-        try:
-            payload = json.loads(SERVO_STATE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            logger.exception("failed to read persisted servo state")
-            return
-
-        if not isinstance(payload, dict) or not isinstance(payload.get("channels"), list):
-            logger.warning("ignoring invalid persisted servo state")
-            return
-
-        restored_states: dict[int, ServoState] = {}
-        for entry in payload["channels"]:
-            restored_entry = self._parse_persisted_state_entry(entry)
-            if restored_entry is None:
-                continue
-
-            channel = restored_entry["channel"]
-            state = restored_entry["state"]
-
-            restored_states[channel] = state
-            self._states[channel] = state
-            if state in ("open", "closed"):
-                self._angles[channel] = self._target_angle(channel, state)
-            else:
-                self._angles[channel] = None
-
-        if restored_states:
-            logger.info("servo startup state restored without motion: %s", restored_states)
-        else:
-            logger.warning("servo startup state unavailable: persisted state file had no valid channels")
+    def _set_startup_state(self) -> None:
+        for channel in SERVO_CHANNELS:
+            self._set_angle_sync(channel, "closed")
+            self._states[channel] = "closed"
 
     async def toggle_servo(self, channel: int) -> tuple[list[int], ServoStableState]:
         async with self._lock:
@@ -251,7 +172,6 @@ class ServoController:
                 raise ValueError("servo_hardware_error") from exc
 
             self._states[channel] = "unknown"
-            self._persist_states()
 
     async def set_servos(self, channels: list[int], target_state: ServoStableState) -> list[int]:
         async with self._lock:
@@ -306,4 +226,3 @@ class ServoController:
         async with self._lock:
             for channel in channels:
                 self._states[channel] = target_state
-            self._persist_states()
