@@ -43,9 +43,11 @@ async def main() -> None:
                 services.pop(service_name, None)
                 if services:
                     logger.warning(
-                        "continuing with remaining services: %s",
+                        "stopping remaining services after %s service exit: %s",
+                        service_name,
                         ", ".join(sorted(services)),
                     )
+                    return
     except asyncio.CancelledError:
         raise
     finally:

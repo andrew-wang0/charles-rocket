@@ -665,5 +665,6 @@ async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
             await asyncio.Future()
     except asyncio.CancelledError:
         logger.info("server cancelled")
+        raise
     finally:
         await shutdown_runtime()
