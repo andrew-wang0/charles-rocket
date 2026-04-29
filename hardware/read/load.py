@@ -21,6 +21,7 @@ from config import (
 
 logger = logging.getLogger(__name__)
 MAX_CONSECUTIVE_READ_FAILURES = 5
+THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 
 
 class LoadSampler:
@@ -92,7 +93,7 @@ class LoadSampler:
         self._stop_event.set()
 
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
             self._thread = None
 
         if self._data_file is not None:

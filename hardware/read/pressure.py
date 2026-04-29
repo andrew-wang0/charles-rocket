@@ -29,6 +29,7 @@ RASPBERRY_PI_SYSTEM_PACKAGES = Path("/usr/lib/python3/dist-packages")
 TRANSPORT_SAMPLE_INTERVAL_SECONDS = 1 / PRESSURE_TRANSPORT_RATE_HZ
 RAW_BUFFER_MAXLEN = PRESSURE_RAW_WINDOW_SECONDS * ADS1115_DATA_RATE
 TRANSPORT_BUFFER_MAXLEN = PRESSURE_TRANSPORT_WINDOW_SECONDS * PRESSURE_TRANSPORT_RATE_HZ
+THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 
 
 class PressureSampler:
@@ -114,7 +115,7 @@ class PressureSampler:
         self._stop_event.set()
 
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
             self._thread = None
 
         for handle in self._file_handles:

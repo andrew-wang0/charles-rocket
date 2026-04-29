@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 BOUNDARY = "frame"
 CAMERA_READER_APP_KEY = "camera_reader"
+VIDEO_SHUTDOWN_TIMEOUT_SECONDS = 0.1
 
 
 def get_camera_reader(request: web.Request) -> CameraReader:
@@ -104,7 +105,12 @@ async def serve_video_server() -> None:
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, VIDEO_STREAM_HOST, VIDEO_STREAM_PORT)
+    site = web.TCPSite(
+        runner,
+        VIDEO_STREAM_HOST,
+        VIDEO_STREAM_PORT,
+        shutdown_timeout=VIDEO_SHUTDOWN_TIMEOUT_SECONDS,
+    )
 
     logger.info(
         "starting video server on http://%s:%s%s",
@@ -124,7 +130,6 @@ async def serve_video_server() -> None:
     try:
         await asyncio.Future()
     except asyncio.CancelledError:
-        logger.info("video server cancelled")
         raise
     finally:
         camera_reader.stop()

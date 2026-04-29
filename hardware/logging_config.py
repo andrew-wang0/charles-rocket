@@ -91,5 +91,6 @@ def setup_logging(level: int = logging.INFO) -> None:
     root_logger.handlers.clear()
     root_logger.setLevel(level)
     root_logger.addHandler(handler)
+    logging.getLogger("websockets.server").setLevel(logging.WARNING)
 
     _configured = True

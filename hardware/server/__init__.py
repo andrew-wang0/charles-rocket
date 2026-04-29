@@ -49,9 +49,11 @@ async def main() -> None:
                     )
                     return
     except asyncio.CancelledError:
+        logger.warning("shutdown requested")
         raise
     finally:
-        for task in services.values():
+        for name, task in services.items():
+            logger.info("shutting down %s service", name)
             task.cancel()
 
         await asyncio.gather(*services.values(), return_exceptions=True)

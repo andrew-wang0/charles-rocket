@@ -24,6 +24,7 @@ METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 SERVER_ERROR = -32000
+WEBSOCKET_CLOSE_TIMEOUT_SECONDS = 0.1
 
 SERVO_CHANNEL_BY_INDEX = {
     index: channel for index, channel in enumerate(SERVO_CHANNELS, start=1)
@@ -348,7 +349,7 @@ async def initialize_sampler(
     label: str,
 ) -> PressureSampler | LoadSampler | None:
     try:
-        sampler = await asyncio.to_thread(sampler_type, calibration)
+        sampler = sampler_type(calibration)
         sampler.start()
         if not sampler.available:
             logger.warning("%s sampler unavailable: %s", label, sampler.error or "unknown_error")
@@ -659,12 +660,16 @@ async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
     initialize_control_runtime(calibration_set)
 
     try:
-        async with websockets.serve(handler, HOST, PORT):
+        async with websockets.serve(
+            handler,
+            HOST,
+            PORT,
+            close_timeout=WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+        ):
             logger.info("websocket server listening on ws://%s:%s", HOST, PORT)
             start_sensor_startup_tasks(calibration_set)
             await asyncio.Future()
     except asyncio.CancelledError:
-        logger.info("server cancelled")
         raise
     finally:
         await shutdown_runtime()

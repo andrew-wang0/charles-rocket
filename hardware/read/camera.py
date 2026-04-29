@@ -17,6 +17,7 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 
 
 class CameraReader:
@@ -54,7 +55,7 @@ class CameraReader:
         self._stop_event.set()
 
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
             self._thread = None
 
         self._close_capture()

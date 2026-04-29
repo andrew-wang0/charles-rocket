@@ -166,7 +166,7 @@ class ServoController:
                 raise ValueError("servo_busy")
 
             try:
-                await asyncio.to_thread(self._set_manual_angle_sync, channel, angle)
+                self._set_manual_angle_sync(channel, angle)
             except Exception as exc:
                 logger.exception("failed to move servo channel=%s angle=%s", channel, angle)
                 raise ValueError("servo_hardware_error") from exc
@@ -203,7 +203,7 @@ class ServoController:
                 continue
 
             try:
-                await asyncio.to_thread(self._set_angle_sync, channel, target_state)
+                self._set_angle_sync(channel, target_state)
             except Exception as exc:
                 logger.exception("failed to move servo channel=%s target=%s", channel, target_state)
                 raise ValueError("servo_hardware_error") from exc
