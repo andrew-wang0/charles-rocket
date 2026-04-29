@@ -213,7 +213,7 @@ class LoadSampler:
         while not self._stop_event.is_set():
             try:
                 timestamp_ms = int(time.time() * 1000)
-                pounds = max(0.0, self._read_weight())
+                pounds = self._read_weight()
                 self._consecutive_failures = 0
                 self._record_sample(timestamp_ms, pounds)
             except Exception as exc:
