@@ -22,6 +22,9 @@ from config import (
 logger = logging.getLogger(__name__)
 MAX_CONSECUTIVE_READ_FAILURES = 5
 THREAD_JOIN_TIMEOUT_SECONDS = 0.2
+HX711_CLOCK_HIGH_TIMEOUT_SECONDS = 0.00006
+HX711_READ_MAX_TRIES = 12
+HX711_READ_ATTEMPT_MULTIPLIER = 4
 
 
 class LoadSampler:
@@ -45,7 +48,7 @@ class LoadSampler:
         try:
             hx711_module = importlib.import_module("hx711")
             self._gpio = importlib.import_module("RPi.GPIO")
-            self._hx = hx711_module.HX711(
+            self._hx = self._create_safe_hx711(hx711_module)(
                 dout_pin=LOAD_CELL_DATA_PIN,
                 pd_sck_pin=LOAD_CELL_CLOCK_PIN,
                 channel="A",
@@ -64,9 +67,63 @@ class LoadSampler:
             )
         except Exception as exc:
             self.error = self._format_init_error(exc)
-            logger.exception("load sampler initialization failed")
+
+    def _create_safe_hx711(self, hx711_module: Any) -> type[Any]:
+        gpio = hx711_module.GPIO
+        generic_error = getattr(hx711_module, "GenericHX711Exception", RuntimeError)
+
+        class SafeHX711(hx711_module.HX711):
+            def _set_channel_gain(self, num: int) -> bool:
+                if not 1 <= num <= 3:
+                    raise AttributeError('"num" has to be in the range of 1 to 3')
+
+                for _ in range(num):
+                    start_counter = time.perf_counter()
+                    gpio.output(self._pd_sck, True)
+                    gpio.output(self._pd_sck, False)
+                    time_elapsed = time.perf_counter() - start_counter
+
+                    if time_elapsed >= HX711_CLOCK_HIGH_TIMEOUT_SECONDS:
+                        raise generic_error(
+                            "hx711_gain_set_timeout:{:0.8f}".format(time_elapsed)
+                        )
+
+                return True
+
+            def get_raw_data(self, times: int = 5) -> list[int]:
+                self._validate_measure_count(times)
+
+                data_list: list[int] = []
+                max_attempts = max(times * HX711_READ_ATTEMPT_MULTIPLIER, times)
+                attempts = 0
+
+                while len(data_list) < times and attempts < max_attempts:
+                    attempts += 1
+                    data = self._read(max_tries=HX711_READ_MAX_TRIES)
+                    if data not in [False, -1]:
+                        data_list.append(data)
+
+                if len(data_list) < times:
+                    raise generic_error(
+                        f"hx711_read_timeout:received={len(data_list)} expected={times} "
+                        f"attempts={attempts}"
+                    )
+
+                return data_list
+
+        return SafeHX711
 
     def _format_init_error(self, exc: Exception) -> str:
+        if isinstance(exc, RecursionError):
+            return (
+                "HX711 initialization failed: reset hit Python recursion depth, "
+                "usually due to unstable timing while setting gain/channel"
+            )
+
+        message = self._format_hx711_error(exc)
+        if message is not None:
+            return f"HX711 initialization failed: {message}"
+
         if isinstance(exc, (ImportError, ModuleNotFoundError, OSError)):
             return (
                 f"{exc}. Install `hx711` and ensure `rpi-lgpio` is installed "
@@ -74,6 +131,17 @@ class LoadSampler:
             )
 
         return str(exc)
+
+    def _format_hx711_error(self, exc: Exception) -> str | None:
+        message = str(exc)
+        if message.startswith("hx711_gain_set_timeout:"):
+            elapsed = message.partition(":")[2] or "unknown"
+            return f"setting gain/channel exceeded 60us (elapsed={elapsed}s)"
+
+        if message.startswith("hx711_read_timeout:"):
+            return "timed out waiting for valid samples"
+
+        return None
 
     def start(self) -> None:
         if not self.available:
@@ -153,20 +221,36 @@ class LoadSampler:
                 with self._lock:
                     self._sensor_ok = False
 
+                formatted_error = self._format_hx711_error(exc)
                 if self._consecutive_failures >= MAX_CONSECUTIVE_READ_FAILURES:
                     self.available = False
-                    logger.exception(
-                        "disabling load sampler after %s consecutive read failures",
-                        self._consecutive_failures,
-                    )
+                    if formatted_error is not None:
+                        logger.error(
+                            "disabling load sampler after %s consecutive read failures: %s",
+                            self._consecutive_failures,
+                            formatted_error,
+                        )
+                    else:
+                        logger.exception(
+                            "disabling load sampler after %s consecutive read failures",
+                            self._consecutive_failures,
+                        )
                     return
 
-                logger.exception(
-                    "failed to record load sample (%s/%s): %s",
-                    self._consecutive_failures,
-                    MAX_CONSECUTIVE_READ_FAILURES,
-                    type(exc).__name__,
-                )
+                if formatted_error is not None:
+                    logger.warning(
+                        "failed to record load sample (%s/%s): %s",
+                        self._consecutive_failures,
+                        MAX_CONSECUTIVE_READ_FAILURES,
+                        formatted_error,
+                    )
+                else:
+                    logger.exception(
+                        "failed to record load sample (%s/%s): %s",
+                        self._consecutive_failures,
+                        MAX_CONSECUTIVE_READ_FAILURES,
+                        type(exc).__name__,
+                    )
                 time.sleep(0.05)
 
     def _read_weight(self) -> float:
