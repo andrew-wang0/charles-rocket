@@ -109,6 +109,8 @@ function handleMethod(method: string, params: unknown, id: JsonRpcId) {
       return okResponse(id, ignitionSnapshot());
     case "readings":
       return okResponse(id, handleReadings(params));
+    case "tare":
+      return okResponse(id, handleTare(params));
     default:
       return errorResponse(id, -32601, `Method not found: ${method}`);
   }
@@ -171,6 +173,34 @@ function handleReadings(params: unknown) {
       load: includeHistory ? loadHistory() : latestLoadPayload(),
       pressure: includeHistory ? pressureHistory() : latestPressurePayload(),
     },
+  };
+}
+
+function handleTare(params: unknown) {
+  const payload = asRecord(params);
+
+  if (payload.device !== "pressure") {
+    throw new Error("tare device must be pressure");
+  }
+
+  const index = Number(payload.index);
+  if (!Number.isInteger(index) || index < 1 || index > PRESSURE_TRANSDUCER_COUNT) {
+    throw new Error("tare index must be a valid pressure transducer number");
+  }
+
+  const channelIndex = index - 1;
+  const tareValue = latestPressureValues[channelIndex] ?? 0;
+
+  latestPressureValues[channelIndex] -= tareValue;
+  pressureBuffers[channelIndex] = pressureBuffers[channelIndex].map((reading) => ({
+    ...reading,
+    value: reading.value - tareValue,
+  }));
+
+  return {
+    device: "pressure",
+    index,
+    value: tareValue,
   };
 }
 
@@ -257,7 +287,7 @@ function seedLoadHistory() {
 
 function nextPressureValue(previous: number) {
   const delta = (Math.random() - 0.5) * 50;
-  return clamp(previous + delta, 0, 500);
+  return clamp(previous + delta, -500, 500);
 }
 
 function randomPressureValue() {

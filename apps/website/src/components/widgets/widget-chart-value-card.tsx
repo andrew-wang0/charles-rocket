@@ -12,6 +12,7 @@ type Props = {
   value: number | undefined;
   display: (value: number | undefined) => string;
   onTare?: () => void;
+  tareDisabled?: boolean;
   trackMax?: boolean;
 } & React.ComponentProps<typeof Card>;
 
@@ -22,6 +23,7 @@ export function WidgetChartValueCard({
   display,
   className,
   onTare,
+  tareDisabled,
   trackMax,
   ...props
 }: Props) {
@@ -49,7 +51,7 @@ export function WidgetChartValueCard({
           </div>
         </div>
         {onTare && (
-          <Button size="xs" variant="outline" onClick={onTare}>
+          <Button size="xs" variant="outline" onClick={onTare} disabled={tareDisabled}>
             Tare
           </Button>
         )}

@@ -2,6 +2,7 @@
 
 import React from "react";
 
+import { client } from "@/client";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   chartConfig,
@@ -20,6 +21,24 @@ export function PressureWidget() {
   const pt2 = useStore((store) => store.pressureLatestValues[1]);
   const pt3 = useStore((store) => store.pressureLatestValues[2]);
   const latestValues = [pt1, pt2, pt3];
+  const [pendingIndex, setPendingIndex] = React.useState<number | null>(null);
+
+  async function handleTare(index: number) {
+    if (pendingIndex !== null || latestValues[index] === undefined) return;
+
+    setPendingIndex(index);
+
+    try {
+      await client.tare({
+        device: "pressure",
+        index: index + 1,
+      });
+    } catch (error) {
+      console.error(`Failed to tare PT ${index + 1}`, error);
+    } finally {
+      setPendingIndex(null);
+    }
+  }
 
   return (
     <WidgetCard size="sm">
@@ -39,7 +58,10 @@ export function PressureWidget() {
                   color={color}
                   value={latest}
                   display={(value) => `${formatChartValue(value)} PSI`}
-                  onTare={() => {}}
+                  onTare={() => {
+                    void handleTare(index);
+                  }}
+                  tareDisabled={latest === undefined || pendingIndex !== null}
                 />
               );
             })}

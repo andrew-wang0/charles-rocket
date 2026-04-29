@@ -248,6 +248,15 @@ def parse_ignition_target(value: Any) -> IgnitionStableState:
     raise ValueError("Invalid params")
 
 
+def parse_pressure_index(value: Any) -> int:
+    index = int(value)
+
+    if index < 1 or index > PRESSURE_TRANSDUCER_COUNT:
+        raise ValueError("Invalid params")
+
+    return index - 1
+
+
 async def send_text(websocket: Any, payload: str) -> bool:
     lock = client_send_locks.get(websocket)
     if lock is None:
@@ -535,6 +544,30 @@ async def handle_ignition_control(
     }
 
 
+async def handle_tare(
+    _websocket: Any,
+    params: Any,
+) -> dict[str, Any]:
+    if not isinstance(params, dict) or params.get("device") != "pressure" or "index" not in params:
+        raise ValueError("Invalid params")
+
+    try:
+        channel_index = parse_pressure_index(params["index"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid params") from exc
+
+    try:
+        tare_value = get_pressure_sampler().tare(channel_index)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    return {
+        "device": "pressure",
+        "index": channel_index + 1,
+        "value": tare_value,
+    }
+
+
 async def dispatch_request(
     websocket: Any,
     method: str,
@@ -561,6 +594,9 @@ async def dispatch_request(
     if method == "readings":
         include_history = isinstance(params, dict) and bool(params.get("history"))
         return build_readings_result(include_history=include_history)
+
+    if method == "tare":
+        return await handle_tare(websocket, params)
 
     raise LookupError("Method not found")
 

@@ -4,6 +4,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 from config import (
     LOAD_CELL_OFFSET,
@@ -90,6 +91,15 @@ def _load_pressure_calibration() -> list[PressureCalibrationEntry]:
     return _pad(entries, default)
 
 
+def save_pressure_calibration(entries: Sequence[PressureCalibrationEntry]) -> None:
+    payload = [{"zero": float(entry.zero)} for entry in entries[:PRESSURE_TRANSDUCER_COUNT]]
+    default_count = PRESSURE_TRANSDUCER_COUNT - len(payload)
+    if default_count > 0:
+        payload.extend({"zero": 0.0} for _ in range(default_count))
+
+    _write_json("pressure_transducer_calibration.json", payload)
+
+
 def _load_load_calibration() -> LoadCalibrationEntry:
     payload = _read_json("load_cell_calibration.json")
     if not isinstance(payload, dict):
@@ -109,6 +119,11 @@ def _read_json(filename: str):
     except Exception:
         logger.exception("failed to read calibration file: %s", path)
         return None
+
+
+def _write_json(filename: str, payload: object) -> None:
+    path = CALIBRATION_DIR / filename
+    path.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
 
 
 def _pad(entries, defaults):

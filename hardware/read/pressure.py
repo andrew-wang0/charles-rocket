@@ -10,7 +10,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Sequence, TextIO
 
-from calibration import PressureCalibrationEntry
+from calibration import PressureCalibrationEntry, save_pressure_calibration
 from config import (
     ADS1115_DATA_RATE,
     ADS1115_GAIN,
@@ -150,6 +150,40 @@ class PressureSampler:
                 for buffer in self._raw_buffers
             ]
 
+    def tare(self, channel_index: int) -> float:
+        if channel_index < 0 or channel_index >= PRESSURE_TRANSDUCER_COUNT:
+            raise ValueError("invalid_pressure_index")
+
+        with self._lock:
+            latest = self._raw_buffers[channel_index][-1] if self._raw_buffers[channel_index] else None
+            if latest is None:
+                raise ValueError("pressure_tare_unavailable")
+
+            tare_value = latest[1]
+            next_zero_offsets = list(self._zero_offsets)
+            next_zero_offsets[channel_index] += tare_value
+
+            next_calibration = [
+                PressureCalibrationEntry(zero=offset)
+                for offset in next_zero_offsets
+            ]
+            save_pressure_calibration(next_calibration)
+
+            self._zero_offsets = next_zero_offsets
+            self._raw_buffers[channel_index] = deque(
+                ((timestamp_ms, value - tare_value) for timestamp_ms, value in self._raw_buffers[channel_index]),
+                maxlen=RAW_BUFFER_MAXLEN,
+            )
+            self._transport_buffers[channel_index] = deque(
+                (
+                    (timestamp_ms, value - tare_value)
+                    for timestamp_ms, value in self._transport_buffers[channel_index]
+                ),
+                maxlen=TRANSPORT_BUFFER_MAXLEN,
+            )
+
+            return tare_value
+
     def _open_data_file(self, index: int) -> TextIO:
         path = self._data_dir / f"pt-{index + 1}.csv"
         is_new_file = not path.exists() or path.stat().st_size == 0
@@ -167,8 +201,7 @@ class PressureSampler:
             try:
                 voltage = self._read_voltage(channel_index)
                 timestamp_ms = int(time.time() * 1000)
-                psi = self._voltage_to_psi(voltage, channel_index)
-                self._record_sample(channel_index, timestamp_ms, psi, voltage)
+                self._record_sample(channel_index, timestamp_ms, voltage)
                 channel_index = (channel_index + 1) % PRESSURE_TRANSDUCER_COUNT
             except Exception:
                 logger.exception("failed to record pressure sample on channel=%s", channel_index)
@@ -179,19 +212,19 @@ class PressureSampler:
     def _read_voltage(self, channel_index: int) -> float:
         return float(self._channels[channel_index].voltage)
 
-    def _voltage_to_psi(self, voltage: float, channel_index: int) -> float:
+    def _voltage_to_psi(self, voltage: float, zero_offset: float) -> float:
         psi = (voltage / PRESSURE_TRANSDUCER_MAX_VOLTAGE) * PRESSURE_TRANSDUCER_MAX_PSI
-        psi -= self._zero_offsets[channel_index]
-        return max(0.0, min(PRESSURE_TRANSDUCER_MAX_PSI, psi))
+        psi -= zero_offset
+        return min(PRESSURE_TRANSDUCER_MAX_PSI, psi)
 
     def _record_sample(
         self,
         channel_index: int,
         timestamp_ms: int,
-        psi: float,
         voltage: float,
     ) -> None:
         with self._lock:
+            psi = self._voltage_to_psi(voltage, self._zero_offsets[channel_index])
             self._sensor_ok[channel_index] = True
             self._raw_buffers[channel_index].append((timestamp_ms, psi))
 

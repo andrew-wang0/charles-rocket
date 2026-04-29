@@ -16,7 +16,7 @@ export function ControlShutoffAll({ className, ...props }: Props) {
   const ignition = useIgnitionControl();
   const { setServos } = useServoControl();
   const servos = useServoGroup(ALL_SERVO_INDEXES);
-  const isDisabled = servos.isBusy || servos.anyUnknown || ignition.isBusy || ignition.isUnknown;
+  const isDisabled = servos.isBusy || ignition.isBusy || ignition.isUnknown;
 
   async function handleCloseAll() {
     if (isDisabled) return;
