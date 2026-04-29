@@ -2,6 +2,7 @@
 
 import React from "react";
 
+import { client } from "@/client";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { loadChartConfig, LoadWidgetChart } from "@/components/widgets/load/load-widget-chart";
 import { WidgetCard } from "@/components/widgets/widget-card";
@@ -14,6 +15,23 @@ import { WidgetNoSignal } from "../widget-no-signal";
 export function LoadWidget() {
   const hasLoadData = useStore((store) => store.loadChartData.length > 0);
   const latest = useStore((store) => store.loadLatestValue);
+  const [tarePending, setTarePending] = React.useState(false);
+
+  async function handleTare() {
+    if (tarePending || latest === undefined) return;
+
+    setTarePending(true);
+
+    try {
+      await client.tare({
+        device: "load",
+      });
+    } catch (error) {
+      console.error("Failed to tare load cell", error);
+    } finally {
+      setTarePending(false);
+    }
+  }
 
   return (
     <WidgetCard size="sm">
@@ -25,8 +43,11 @@ export function LoadWidget() {
           label="Load"
           color={loadChartConfig.load.color}
           value={latest}
-          display={(value) => `${formatChartValue(value)} kg`}
-          onTare={() => {}}
+          display={(value) => `${formatChartValue(value)} lb`}
+          onTare={() => {
+            void handleTare();
+          }}
+          tareDisabled={latest === undefined || tarePending}
           trackMax
         />
         {!hasLoadData ? <WidgetNoSignal className="flex-1" /> : <LoadWidgetChart />}

@@ -16,6 +16,7 @@ import {
   CHART_WINDOW_MS,
   createTickValues,
   formatAxisTick,
+  formatChartValue,
   formatRelativeTick,
 } from "@/lib/util/chart";
 
@@ -71,7 +72,13 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
         />
         <ChartTooltip
           cursor={false}
-          content={<ChartTooltipContent indicator="line" labelFormatter={() => null} />}
+          content={
+            <ChartTooltipContent
+              indicator="line"
+              labelFormatter={() => null}
+              formatter={(value) => `${formatChartValue(Number(value))} lb`}
+            />
+          }
         />
         <Line
           dataKey="load"

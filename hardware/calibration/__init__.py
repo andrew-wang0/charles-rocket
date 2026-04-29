@@ -100,6 +100,16 @@ def save_pressure_calibration(entries: Sequence[PressureCalibrationEntry]) -> No
     _write_json("pressure_transducer_calibration.json", payload)
 
 
+def save_load_calibration(entry: LoadCalibrationEntry) -> None:
+    _write_json(
+        "load_cell_calibration.json",
+        {
+            "reference_unit": float(entry.reference_unit),
+            "zero": float(entry.zero),
+        },
+    )
+
+
 def _load_load_calibration() -> LoadCalibrationEntry:
     payload = _read_json("load_cell_calibration.json")
     if not isinstance(payload, dict):

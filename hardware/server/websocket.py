@@ -548,24 +548,41 @@ async def handle_tare(
     _websocket: Any,
     params: Any,
 ) -> dict[str, Any]:
-    if not isinstance(params, dict) or params.get("device") != "pressure" or "index" not in params:
+    if not isinstance(params, dict):
         raise ValueError("Invalid params")
 
-    try:
-        channel_index = parse_pressure_index(params["index"])
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Invalid params") from exc
+    if params.get("device") == "pressure":
+        if "index" not in params:
+            raise ValueError("Invalid params")
 
-    try:
-        tare_value = get_pressure_sampler().tare(channel_index)
-    except ValueError as exc:
-        raise RuntimeError(str(exc)) from exc
+        try:
+            channel_index = parse_pressure_index(params["index"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invalid params") from exc
 
-    return {
-        "device": "pressure",
-        "index": channel_index,
-        "value": tare_value,
-    }
+        try:
+            tare_value = get_pressure_sampler().tare(channel_index)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        return {
+            "device": "pressure",
+            "index": channel_index,
+            "value": tare_value,
+        }
+
+    if params.get("device") == "load":
+        try:
+            tare_value = get_load_sampler().tare()
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        return {
+            "device": "load",
+            "value": tare_value,
+        }
+
+    raise ValueError("Invalid params")
 
 
 async def dispatch_request(

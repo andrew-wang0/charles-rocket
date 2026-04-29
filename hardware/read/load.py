@@ -9,7 +9,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, TextIO
 
-from calibration import LoadCalibrationEntry
+from calibration import LoadCalibrationEntry, save_load_calibration
 from config import (
     LOAD_CELL_CLOCK_PIN,
     LOAD_CELL_DATA_PIN,
@@ -199,6 +199,28 @@ class LoadSampler:
             timestamp_ms, pounds = self._buffer[-1]
             return [{"time": timestamp_ms, "value": pounds}]
 
+    def tare(self) -> float:
+        with self._lock:
+            latest = self._buffer[-1] if self._buffer else None
+            if latest is None:
+                raise ValueError("load_tare_unavailable")
+
+            if self._reference_unit == 0:
+                raise ValueError("load_tare_invalid_reference_unit")
+
+            tare_value = latest[1]
+            next_zero = self._zero + tare_value * self._reference_unit
+            save_load_calibration(
+                LoadCalibrationEntry(reference_unit=self._reference_unit, zero=next_zero)
+            )
+
+            self._zero = next_zero
+            self._buffer = deque(
+                ((timestamp_ms, value - tare_value) for timestamp_ms, value in self._buffer)
+            )
+
+            return tare_value
+
     def _open_data_file(self) -> TextIO:
         path = self._data_dir / "load-cell.csv"
         is_new_file = not path.exists() or path.stat().st_size == 0
@@ -260,7 +282,14 @@ class LoadSampler:
             raise RuntimeError("no load cell samples returned")
 
         raw_value = sum(raw_samples) / len(raw_samples)
-        return (raw_value - self._zero) / self._reference_unit
+        with self._lock:
+            zero = self._zero
+            reference_unit = self._reference_unit
+
+        if reference_unit == 0:
+            raise RuntimeError("load_reference_unit_zero")
+
+        return (raw_value - zero) / reference_unit
 
     def _record_sample(self, timestamp_ms: int, pounds: float) -> None:
         cutoff = timestamp_ms - LOAD_CELL_WINDOW_SECONDS * 1000
