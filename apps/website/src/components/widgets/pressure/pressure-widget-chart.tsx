@@ -15,6 +15,7 @@ import {
   createTickValues,
   formatAxisTick,
   formatRelativeTick,
+  type PressureChartPoint,
 } from "@/lib/util/chart";
 
 export const chartConfig = {
@@ -32,6 +33,47 @@ export const chartConfig = {
   },
 } satisfies ChartConfig;
 
+const PRESSURE_AXIS_TICK_COUNT = 5;
+const MIN_PRESSURE_AXIS_RANGE_PSI = 10;
+
+function getNiceAxisStep(minStep: number) {
+  const magnitude = 10 ** Math.floor(Math.log10(minStep));
+  const normalized = minStep / magnitude;
+
+  if (normalized <= 1) return magnitude;
+  if (normalized <= 2) return 2 * magnitude;
+  if (normalized <= 2.5) return 2.5 * magnitude;
+  if (normalized <= 5) return 5 * magnitude;
+  return 10 * magnitude;
+}
+
+function buildPressureAxisTicks(chartData: PressureChartPoint[]) {
+  const values = chartData
+    .flatMap((point) => [point.pt1, point.pt2, point.pt3])
+    .filter((value): value is number => value !== null);
+
+  if (values.length === 0) {
+    return [-5, -2.5, 0, 2.5, 5];
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  if (min >= 0) {
+    const step = getNiceAxisStep(Math.max(max, MIN_PRESSURE_AXIS_RANGE_PSI) / 4);
+    return Array.from({ length: PRESSURE_AXIS_TICK_COUNT }, (_, index) => step * index);
+  }
+
+  if (max <= 0) {
+    const step = getNiceAxisStep(Math.max(Math.abs(min), MIN_PRESSURE_AXIS_RANGE_PSI) / 4);
+    return Array.from({ length: PRESSURE_AXIS_TICK_COUNT }, (_, index) => step * (index - 4));
+  }
+
+  const maxAbs = Math.max(Math.abs(min), Math.abs(max));
+  const step = getNiceAxisStep(Math.max(maxAbs / 2, MIN_PRESSURE_AXIS_RANGE_PSI / 4));
+  return Array.from({ length: PRESSURE_AXIS_TICK_COUNT }, (_, index) => step * (index - 2));
+}
+
 export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
   const chartData = useStore((store) => store.pressureChartData);
   const latestTime = chartData.at(-1)?.time ?? 0;
@@ -41,6 +83,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
     () => createTickValues(windowStart, latestTime),
     [latestTime, windowStart],
   );
+  const pressureAxisTicks = React.useMemo(() => buildPressureAxisTicks(chartData), [chartData]);
 
   return (
     <ChartContainer
@@ -60,6 +103,11 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
           axisLine={false}
           tickLine={false}
           tickMargin={6}
+          ticks={pressureAxisTicks}
+          domain={[
+            pressureAxisTicks[0] ?? 0,
+            pressureAxisTicks.at(-1) ?? MIN_PRESSURE_AXIS_RANGE_PSI,
+          ]}
           width={52}
           tickFormatter={(value) => formatAxisTick(Number(value))}
         />
