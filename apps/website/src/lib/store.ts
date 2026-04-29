@@ -48,7 +48,10 @@ type Store = {
   readingsStatus: ReadingsStatus;
 
   ignitionState: IgnitionState;
+  ignitionPendingCount: number;
   setIgnitionState: (state: IgnitionState) => void;
+  startIgnitionRequest: () => void;
+  finishIgnitionRequest: () => void;
 
   servoStates: ServoState[];
   setServoState: (index: number, state: ServoState) => void;
@@ -178,7 +181,16 @@ export const useStore = create<Store>((set) => ({
   },
 
   ignitionState: IgnitionState.UNKNOWN,
+  ignitionPendingCount: 0,
   setIgnitionState: (ignitionState) => set({ ignitionState }),
+  startIgnitionRequest: () =>
+    set((state) => ({
+      ignitionPendingCount: state.ignitionPendingCount + 1,
+    })),
+  finishIgnitionRequest: () =>
+    set((state) => ({
+      ignitionPendingCount: Math.max(0, state.ignitionPendingCount - 1),
+    })),
 
   servoStates: createInitialServoStates(),
 
