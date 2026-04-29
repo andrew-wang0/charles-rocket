@@ -60,7 +60,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
           axisLine={false}
           tickLine={false}
           tickMargin={6}
-          width={32}
+          width={44}
           tickFormatter={(value) => formatAxisTick(Number(value))}
         />
         <XAxis

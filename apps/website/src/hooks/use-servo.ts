@@ -19,13 +19,11 @@ function getServoAggregateState(states: ServoState[]) {
 }
 
 function toServoRequestIndex(index: number) {
-  const requestIndex = index + 1;
-
-  if (requestIndex < 1 || requestIndex > SERVO_COUNT) {
+  if (index < 0 || index >= SERVO_COUNT) {
     throw new Error(`Invalid servo index: ${index}`);
   }
 
-  return requestIndex;
+  return index;
 }
 
 function toServoRequestIndexes(indexes: number[]) {

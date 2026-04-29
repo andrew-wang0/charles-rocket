@@ -37,6 +37,11 @@ class ServoChannelState(TypedDict):
     state: ServoState
 
 
+class PersistedServoChannelState(TypedDict):
+    channel: int
+    state: ServoStableState | ServoUnknownState
+
+
 class ServoController:
     def __init__(self, calibration: Sequence[ServoCalibrationEntry] | None = None) -> None:
         self._lock = asyncio.Lock()
@@ -159,6 +164,27 @@ class ServoController:
         except Exception:
             logger.exception("failed to persist servo state")
 
+    def _parse_persisted_state_entry(
+        self,
+        entry: object,
+    ) -> PersistedServoChannelState | None:
+        if not isinstance(entry, dict):
+            return None
+
+        channel = entry.get("channel")
+        if not isinstance(channel, int) or channel not in SERVO_CHANNELS:
+            return None
+
+        state = entry.get("state")
+        if state == "open" or state == "closed" or state == "unknown":
+            restored_entry: PersistedServoChannelState = {
+                "channel": channel,
+                "state": state,
+            }
+            return restored_entry
+
+        return None
+
     def _restore_startup_state(self) -> None:
         if not SERVO_STATE_FILE.exists():
             logger.warning("servo startup state unavailable: no persisted state file")
@@ -176,13 +202,12 @@ class ServoController:
 
         restored_states: dict[int, ServoState] = {}
         for entry in payload["channels"]:
-            if not isinstance(entry, dict):
+            restored_entry = self._parse_persisted_state_entry(entry)
+            if restored_entry is None:
                 continue
 
-            channel = entry.get("channel")
-            state = entry.get("state")
-            if channel not in SERVO_CHANNELS or state not in ("open", "closed", "unknown"):
-                continue
+            channel = restored_entry["channel"]
+            state = restored_entry["state"]
 
             restored_states[channel] = state
             self._states[channel] = state

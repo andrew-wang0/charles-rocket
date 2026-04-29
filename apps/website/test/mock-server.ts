@@ -121,7 +121,7 @@ function handleServoControl(params: unknown) {
   const index = Number(payload.index);
   const nextState = payload.set;
 
-  if (!Number.isInteger(index) || index < 1 || index > SERVO_COUNT) {
+  if (!Number.isInteger(index) || index < 0 || index >= SERVO_COUNT) {
     throw new Error("servoControl index must be a valid servo number");
   }
 
@@ -129,7 +129,7 @@ function handleServoControl(params: unknown) {
     throw new Error("servoControl set must be OPEN or CLOSED");
   }
 
-  servoStates[index - 1] = nextState;
+  servoStates[index] = nextState;
 
   return {
     result: "success",
@@ -184,11 +184,11 @@ function handleTare(params: unknown) {
   }
 
   const index = Number(payload.index);
-  if (!Number.isInteger(index) || index < 1 || index > PRESSURE_TRANSDUCER_COUNT) {
+  if (!Number.isInteger(index) || index < 0 || index >= PRESSURE_TRANSDUCER_COUNT) {
     throw new Error("tare index must be a valid pressure transducer number");
   }
 
-  const channelIndex = index - 1;
+  const channelIndex = index;
   const tareValue = latestPressureValues[channelIndex] ?? 0;
 
   latestPressureValues[channelIndex] -= tareValue;
@@ -207,7 +207,7 @@ function handleTare(params: unknown) {
 function servoSnapshot() {
   return {
     states: servoStates.map((state, index) => ({
-      index: index + 1,
+      index,
       state,
     })),
   };

@@ -31,7 +31,7 @@ export function PressureWidget() {
     try {
       await client.tare({
         device: "pressure",
-        index: index + 1,
+        index,
       });
     } catch (error) {
       console.error(`Failed to tare PT ${index + 1}`, error);

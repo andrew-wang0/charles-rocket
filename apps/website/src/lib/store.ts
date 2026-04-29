@@ -206,7 +206,7 @@ export const useStore = create<Store>((set) => ({
       const servoStates = createInitialServoStates();
 
       states.forEach(({ index, state }) => {
-        servoStates[index - 1] = state;
+        servoStates[index] = state;
       });
 
       return { servoStates };

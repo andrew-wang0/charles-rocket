@@ -27,7 +27,7 @@ SERVER_ERROR = -32000
 WEBSOCKET_CLOSE_TIMEOUT_SECONDS = 0.1
 
 SERVO_CHANNEL_BY_INDEX = {
-    index: channel for index, channel in enumerate(SERVO_CHANNELS, start=1)
+    index: channel for index, channel in enumerate(SERVO_CHANNELS)
 }
 SERVO_INDEX_BY_CHANNEL = {
     channel: index for index, channel in SERVO_CHANNEL_BY_INDEX.items()
@@ -251,10 +251,10 @@ def parse_ignition_target(value: Any) -> IgnitionStableState:
 def parse_pressure_index(value: Any) -> int:
     index = int(value)
 
-    if index < 1 or index > PRESSURE_TRANSDUCER_COUNT:
+    if index < 0 or index >= PRESSURE_TRANSDUCER_COUNT:
         raise ValueError("Invalid params")
 
-    return index - 1
+    return index
 
 
 async def send_text(websocket: Any, payload: str) -> bool:
@@ -563,7 +563,7 @@ async def handle_tare(
 
     return {
         "device": "pressure",
-        "index": channel_index + 1,
+        "index": channel_index,
         "value": tare_value,
     }
 

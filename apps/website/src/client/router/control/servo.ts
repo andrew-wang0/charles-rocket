@@ -5,7 +5,10 @@ import { result } from "@/client/router/types";
 import { SERVO_COUNT } from "@/lib/constants";
 import { ServoState } from "@/types/servo";
 
-const servoIndex = z.int().min(1).max(SERVO_COUNT);
+const servoIndex = z
+  .int()
+  .min(0)
+  .max(SERVO_COUNT - 1);
 const servoIndexes = z
   .array(servoIndex)
   .min(1)
