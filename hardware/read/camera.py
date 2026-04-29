@@ -8,6 +8,8 @@ import time
 from typing import Any
 
 from config import (
+    VIDEO_CAPTURE_BUFFER_SIZE,
+    VIDEO_CAPTURE_FPS,
     VIDEO_DEVICE_PATH,
     VIDEO_FRAME_HEIGHT,
     VIDEO_FRAME_WIDTH,
@@ -88,9 +90,23 @@ class CameraReader:
         capture.set(self._cv2.CAP_PROP_FOURCC, mjpg_fourcc)
         capture.set(self._cv2.CAP_PROP_FRAME_WIDTH, VIDEO_FRAME_WIDTH)
         capture.set(self._cv2.CAP_PROP_FRAME_HEIGHT, VIDEO_FRAME_HEIGHT)
+        capture.set(self._cv2.CAP_PROP_FPS, VIDEO_CAPTURE_FPS)
+
+        buffer_size_prop = getattr(self._cv2, "CAP_PROP_BUFFERSIZE", None)
+        if buffer_size_prop is not None:
+            capture.set(buffer_size_prop, VIDEO_CAPTURE_BUFFER_SIZE)
 
         self._capture = capture
-        logger.info("camera ready: device=%s", VIDEO_DEVICE_PATH)
+        logger.info(
+            "camera ready: device=%s requested=%sx%s@%sfps actual=%sx%s@%.2ffps",
+            VIDEO_DEVICE_PATH,
+            VIDEO_FRAME_WIDTH,
+            VIDEO_FRAME_HEIGHT,
+            VIDEO_CAPTURE_FPS,
+            int(capture.get(self._cv2.CAP_PROP_FRAME_WIDTH)),
+            int(capture.get(self._cv2.CAP_PROP_FRAME_HEIGHT)),
+            capture.get(self._cv2.CAP_PROP_FPS),
+        )
         return True
 
     def _close_capture(self) -> None:

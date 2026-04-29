@@ -21,9 +21,10 @@ def get_camera_reader(request: web.Request) -> CameraReader:
 
 
 async def wait_for_frame(camera_reader: CameraReader, timeout_seconds: float) -> bytes | None:
-    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
 
-    while asyncio.get_running_loop().time() < deadline:
+    while loop.time() < deadline:
         frame = camera_reader.latest_frame()
         if frame is not None:
             return frame
@@ -49,8 +50,11 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
 
+    loop = asyncio.get_running_loop()
     last_frame_time = -1
     frame_interval = 1 / VIDEO_STREAM_FPS
+    poll_interval = min(frame_interval / 2, 0.005)
+    last_send_time = 0.0
 
     try:
         while True:
@@ -58,8 +62,12 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
             frame_time = camera_reader.latest_frame_time_ms()
 
             if frame is None or frame_time == last_frame_time:
-                await asyncio.sleep(frame_interval)
+                await asyncio.sleep(poll_interval)
                 continue
+
+            delay = (last_send_time + frame_interval) - loop.time()
+            if delay > 0:
+                await asyncio.sleep(delay)
 
             last_frame_time = frame_time
             await response.write(
@@ -71,7 +79,7 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
             )
             await response.write(frame)
             await response.write(b"\r\n")
-            await asyncio.sleep(frame_interval)
+            last_send_time = loop.time()
     except asyncio.CancelledError:
         raise
     except (ConnectionResetError, BrokenPipeError):

@@ -15,12 +15,7 @@ export function VideoWidget() {
 
   const streamUrl = React.useMemo(() => {
     const url = new URL(env.NEXT_PUBLIC_VIDEO_URL);
-    // MJPEG streams are fetched over HTTP(S), even when the control channel uses websockets.
-    if (url.protocol === "ws:") {
-      url.protocol = "http:";
-    } else if (url.protocol === "wss:") {
-      url.protocol = "https:";
-    }
+
     url.searchParams.set("attempt", String(attempt));
     return url.toString();
   }, [attempt]);
