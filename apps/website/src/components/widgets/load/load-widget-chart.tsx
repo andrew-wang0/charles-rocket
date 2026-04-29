@@ -54,7 +54,7 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
           axisLine={false}
           tickLine={false}
           tickMargin={6}
-          width={44}
+          width={52}
           tickFormatter={(value) => formatAxisTick(Number(value))}
         />
         <XAxis

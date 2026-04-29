@@ -19,9 +19,12 @@ export type PressureChartPoint = {
   pt3: number | null;
 };
 
-export function formatChartValue(value: number | undefined) {
+export function formatChartValue(value: number | undefined, precision: number = 2) {
   if (value === undefined) return "--";
-  return value.toFixed(2);
+
+  const formatted = value.toFixed(precision);
+
+  return Number(formatted) === 0 ? (0).toFixed(precision) : formatted;
 }
 
 export function formatAxisTick(value: number) {
