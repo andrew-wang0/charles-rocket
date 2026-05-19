@@ -21,6 +21,7 @@ from config import (
 
 logger = logging.getLogger(__name__)
 MAX_CONSECUTIVE_READ_FAILURES = 5
+CONSECUTIVE_READ_FAILURE_WARNING_THRESHOLD = 3
 THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 HX711_CLOCK_HIGH_TIMEOUT_SECONDS = 0.00006
 HX711_READ_MAX_TRIES = 12
@@ -240,8 +241,12 @@ class LoadSampler:
                 self._record_sample(timestamp_ms, pounds)
             except Exception as exc:
                 self._consecutive_failures += 1
-                with self._lock:
-                    self._sensor_ok = False
+                read_failures_are_degraded = (
+                    self._consecutive_failures >= CONSECUTIVE_READ_FAILURE_WARNING_THRESHOLD
+                )
+                if read_failures_are_degraded:
+                    with self._lock:
+                        self._sensor_ok = False
 
                 formatted_error = self._format_hx711_error(exc)
                 if self._consecutive_failures >= MAX_CONSECUTIVE_READ_FAILURES:
@@ -259,20 +264,30 @@ class LoadSampler:
                         )
                     return
 
+                log_method = logger.warning if read_failures_are_degraded else logger.debug
                 if formatted_error is not None:
-                    logger.warning(
+                    log_method(
                         "failed to record load sample (%s/%s): %s",
                         self._consecutive_failures,
                         MAX_CONSECUTIVE_READ_FAILURES,
                         formatted_error,
                     )
                 else:
-                    logger.exception(
-                        "failed to record load sample (%s/%s): %s",
-                        self._consecutive_failures,
-                        MAX_CONSECUTIVE_READ_FAILURES,
-                        type(exc).__name__,
-                    )
+                    if read_failures_are_degraded:
+                        logger.exception(
+                            "failed to record load sample (%s/%s): %s",
+                            self._consecutive_failures,
+                            MAX_CONSECUTIVE_READ_FAILURES,
+                            type(exc).__name__,
+                        )
+                    else:
+                        logger.debug(
+                            "failed to record load sample (%s/%s): %s",
+                            self._consecutive_failures,
+                            MAX_CONSECUTIVE_READ_FAILURES,
+                            type(exc).__name__,
+                            exc_info=True,
+                        )
                 time.sleep(0.05)
 
     def _read_weight(self) -> float:
