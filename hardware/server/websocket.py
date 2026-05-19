@@ -438,9 +438,10 @@ async def finalize_servo_control(
 
     if transitioned_channels:
         await broadcast_servo_state(exclude=websocket)
-        track_transition_task(
-            asyncio.create_task(finish_servo_transition(transitioned_channels, target_state))
-        )
+        for channel in transitioned_channels:
+            track_transition_task(
+                asyncio.create_task(finish_servo_transition([channel], target_state))
+            )
 
     return {
         "result": "success",

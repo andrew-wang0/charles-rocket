@@ -18,6 +18,9 @@ from config import (
     SERVO_MAX_PULSE_US,
     SERVO_MIN_PULSE_US,
     SERVO_OPEN_ANGLE,
+    SERVO_SLOW_OPEN_CHANNEL,
+    SERVO_SLOW_OPEN_SECONDS,
+    SERVO_SLOW_OPEN_STEP_SECONDS,
     SERVO_TRANSITION_SECONDS,
 )
 
@@ -142,6 +145,9 @@ class ServoController:
             self._set_angle_sync(channel, "closed")
             self._states[channel] = "closed"
 
+    def _uses_slow_open(self, channel: int, target_state: ServoStableState) -> bool:
+        return channel == SERVO_SLOW_OPEN_CHANNEL and target_state == "open"
+
     async def toggle_servo(self, channel: int) -> tuple[list[int], ServoStableState]:
         async with self._lock:
             self._validate_channel(channel)
@@ -203,7 +209,8 @@ class ServoController:
                 continue
 
             try:
-                self._set_angle_sync(channel, target_state)
+                if not self._uses_slow_open(channel, target_state):
+                    self._set_angle_sync(channel, target_state)
             except Exception as exc:
                 logger.exception("failed to move servo channel=%s target=%s", channel, target_state)
                 raise ValueError("servo_hardware_error") from exc
@@ -213,6 +220,38 @@ class ServoController:
 
         return started_channels
 
+    async def _slow_open_channel(self, channel: int) -> None:
+        start_angle = self._angles[channel]
+        if start_angle is None:
+            start_angle = self._close_angles[channel]
+
+        target_angle = self._open_angles[channel]
+        step_count = max(1, round(SERVO_SLOW_OPEN_SECONDS / SERVO_SLOW_OPEN_STEP_SECONDS))
+        step_sleep = SERVO_SLOW_OPEN_SECONDS / step_count
+
+        logger.info(
+            "servo slow open started: channel=%s from=%s to=%s seconds=%s",
+            channel,
+            start_angle,
+            target_angle,
+            SERVO_SLOW_OPEN_SECONDS,
+        )
+
+        for step in range(1, step_count + 1):
+            await asyncio.sleep(step_sleep)
+            angle = start_angle + (target_angle - start_angle) * (step / step_count)
+            try:
+                self._servos[channel].angle = angle
+            except Exception as exc:
+                logger.exception("failed slow open servo channel=%s angle=%s", channel, angle)
+                raise ValueError("servo_hardware_error") from exc
+
+            self._angles[channel] = angle
+
+        self._servos[channel].angle = target_angle
+        self._angles[channel] = target_angle
+        logger.info("servo slow open finished: channel=%s angle=%s", channel, target_angle)
+
     async def finish_transitions(
         self,
         channels: list[int],
@@ -221,7 +260,18 @@ class ServoController:
         if not channels:
             return
 
-        await asyncio.sleep(SERVO_TRANSITION_SECONDS)
+        if len(channels) != 1:
+            await asyncio.gather(
+                *(self.finish_transitions([channel], target_state) for channel in channels)
+            )
+            return
+
+        channel = channels[0]
+
+        if self._uses_slow_open(channel, target_state):
+            await self._slow_open_channel(channel)
+        else:
+            await asyncio.sleep(SERVO_TRANSITION_SECONDS)
 
         async with self._lock:
             for channel in channels:
