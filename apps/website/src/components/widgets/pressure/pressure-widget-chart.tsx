@@ -14,6 +14,7 @@ import {
   CHART_WINDOW_MS,
   createTickValues,
   formatAxisTick,
+  formatChartValue,
   formatRelativeTick,
   type PressureChartPoint,
 } from "@/lib/util/chart";
@@ -125,7 +126,12 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
         />
         <ChartTooltip
           cursor={false}
-          content={<ChartTooltipContent indicator="line" />}
+          content={
+            <ChartTooltipContent
+              indicator="line"
+              valueFormatter={(value) => `${formatChartValue(Number(value), 1)} PSI`}
+            />
+          }
           labelFormatter={() => null}
         />
         <ChartLegend content={<ChartLegendContent />} />

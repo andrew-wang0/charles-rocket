@@ -43,7 +43,7 @@ export function LoadWidget() {
           label="Load"
           color={loadChartConfig.load.color}
           value={latest}
-          display={(value) => `${formatChartValue(value)} lb`}
+          display={(value) => `${formatChartValue(value, 2)} lb`}
           onTare={() => {
             void handleTare();
           }}

@@ -57,7 +57,7 @@ export function PressureWidget() {
                   label={label}
                   color={color}
                   value={latest}
-                  display={(value) => `${formatChartValue(value, 0)} PSI`}
+                  display={(value) => `${formatChartValue(value, 1)} PSI`}
                   onTare={() => {
                     void handleTare(index);
                   }}
