@@ -75,7 +75,7 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
           content={
             <ChartTooltipContent
               indicator="line"
-              labelFormatter={() => null}
+              hideLabel
               valueFormatter={(value) => `${formatChartValue(Number(value), 2)} lb`}
             />
           }
