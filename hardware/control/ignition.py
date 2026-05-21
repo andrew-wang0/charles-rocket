@@ -45,6 +45,7 @@ class IgnitionController:
         if self._gpio is None:
             return
 
+        logger.info("ignition shutdown started: pin=%s state=%s", self._pin, self._state)
         with contextlib.suppress(Exception):
             self._set_state_sync("OFF", announce=False)
         with contextlib.suppress(Exception):
@@ -53,6 +54,7 @@ class IgnitionController:
         self._gpio = None
         self.available = False
         self._state = "OFF"
+        logger.info("ignition shutdown finished: pin=%s state=%s", self._pin, self._state)
 
     def state_payload(self) -> dict[str, IgnitionState]:
         return {"state": self._state}

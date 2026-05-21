@@ -110,8 +110,10 @@ class PressureSampler:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="pressure-sampler", daemon=True)
         self._thread.start()
+        logger.info("pressure sampler started: data_dir=%s", self._data_dir)
 
     def stop(self) -> None:
+        logger.info("pressure sampler stop requested")
         self._stop_event.set()
 
         if self._thread is not None:
@@ -129,6 +131,7 @@ class PressureSampler:
             with contextlib.suppress(Exception):
                 self._i2c.deinit()
             self._i2c = None
+        logger.info("pressure sampler stopped")
 
     def status_payload(self) -> list[bool]:
         with self._lock:
@@ -182,6 +185,12 @@ class PressureSampler:
                 maxlen=TRANSPORT_BUFFER_MAXLEN,
             )
 
+            logger.info(
+                "pressure tare applied: index=%s tare_value=%s zero_offset=%s",
+                channel_index,
+                tare_value,
+                next_zero_offsets[channel_index],
+            )
             return tare_value
 
     def _open_data_file(self, index: int) -> TextIO:

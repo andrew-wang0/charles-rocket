@@ -92,9 +92,12 @@ class ServoController:
         if self._pca is None:
             return
 
+        logger.info("servo controller shutdown started: states=%s", self._states)
         with contextlib.suppress(Exception):
             self._pca.deinit()
         self._pca = None
+        self.available = False
+        logger.info("servo controller shutdown finished")
 
     def state_payload(self) -> dict[str, list[ServoChannelState]]:
         return {
@@ -156,6 +159,7 @@ class ServoController:
             self._validate_channel(channel)
             self._ensure_available()
             target_state = self._target_state_for_toggle(channel)
+            logger.info("servo toggle requested: channel=%s target=%s", channel, target_state)
             channels = await self._start_transitions([channel], target_state)
             return channels, target_state
 
@@ -163,12 +167,14 @@ class ServoController:
         async with self._lock:
             self._validate_channel(channel)
             self._ensure_available()
+            logger.info("servo set requested: channel=%s target=%s", channel, target_state)
             return await self._start_transitions([channel], target_state)
 
     async def set_servo_angle(self, channel: int, angle: float) -> None:
         async with self._lock:
             self._validate_channel(channel)
             self._ensure_available()
+            logger.info("servo manual angle requested: channel=%s angle=%s", channel, angle)
 
             current_state = self._states[channel]
             if current_state in ("opening", "closing"):
@@ -191,11 +197,13 @@ class ServoController:
                 self._validate_channel(channel)
 
             self._ensure_available()
+            logger.info("servo batch set requested: channels=%s target=%s", channels, target_state)
             return await self._start_transitions(channels, target_state)
 
     async def set_all_servos(self, target_state: ServoStableState) -> list[int]:
         async with self._lock:
             self._ensure_available()
+            logger.info("servo all set requested: channels=%s target=%s", SERVO_CHANNELS, target_state)
             return await self._start_transitions(list(SERVO_CHANNELS), target_state)
 
     async def _start_transitions(self, channels: list[int], target_state: ServoStableState) -> list[int]:
@@ -297,3 +305,8 @@ class ServoController:
             for channel in channels:
                 if self._states[channel] == transition_state:
                     self._states[channel] = target_state
+                    logger.info(
+                        "servo transition finished: channel=%s state=%s",
+                        channel,
+                        target_state,
+                    )

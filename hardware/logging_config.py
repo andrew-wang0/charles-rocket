@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 HX711_TIMING_WARNING_PREFIX = "setting gain and channel took more than 60µs."
+DEFAULT_ACTION_LOG_PATH = Path(__file__).resolve().parent / "data" / "hardware-actions.log"
 
 _configured = False
 
@@ -73,24 +75,53 @@ def should_use_color(stream: Any) -> bool:
     return bool(is_a_tty and is_a_tty())
 
 
+def get_action_log_path() -> Path:
+    configured_path = os.environ.get("HARDWARE_ACTION_LOG_PATH")
+
+    if configured_path:
+        return Path(configured_path).expanduser()
+
+    return DEFAULT_ACTION_LOG_PATH
+
+
+def create_file_handler() -> logging.FileHandler:
+    action_log_path = get_action_log_path()
+    action_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    handler = logging.FileHandler(action_log_path, encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s.%(msecs)03d %(levelname)s %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        )
+    )
+    return handler
+
+
 def setup_logging(level: int = logging.INFO) -> None:
     global _configured
 
     if _configured:
         return
 
-    handler = logging.StreamHandler()
-    handler.addFilter(SuppressRepeatedHx711WarningFilter())
+    console_handler = logging.StreamHandler()
+    console_handler.addFilter(SuppressRepeatedHx711WarningFilter())
 
-    if should_use_color(handler.stream):
-        handler.setFormatter(PrettyColorFormatter())
+    if should_use_color(console_handler.stream):
+        console_handler.setFormatter(PrettyColorFormatter())
     else:
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        console_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+        )
+
+    file_handler = create_file_handler()
 
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
     root_logger.setLevel(level)
-    root_logger.addHandler(handler)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
     logging.getLogger("websockets.server").setLevel(logging.WARNING)
+    logging.info("hardware action log ready: path=%s", get_action_log_path())
 
     _configured = True

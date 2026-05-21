@@ -157,8 +157,10 @@ class LoadSampler:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="load-sampler", daemon=True)
         self._thread.start()
+        logger.info("load sampler started: data_dir=%s", self._data_dir)
 
     def stop(self) -> None:
+        logger.info("load sampler stop requested")
         self._stop_event.set()
 
         if self._thread is not None:
@@ -180,6 +182,7 @@ class LoadSampler:
             with contextlib.suppress(Exception):
                 self._gpio.cleanup((LOAD_CELL_DATA_PIN, LOAD_CELL_CLOCK_PIN))
             self._gpio = None
+        logger.info("load sampler stopped")
 
     def status_payload(self) -> bool:
         with self._lock:
@@ -220,6 +223,12 @@ class LoadSampler:
                 ((timestamp_ms, value - tare_value) for timestamp_ms, value in self._buffer)
             )
 
+            logger.info(
+                "load tare applied: tare_value=%s zero=%s reference_unit=%s",
+                tare_value,
+                next_zero,
+                self._reference_unit,
+            )
             return tare_value
 
     def _open_data_file(self) -> TextIO:

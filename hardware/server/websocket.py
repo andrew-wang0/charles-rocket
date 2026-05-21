@@ -566,6 +566,11 @@ async def handle_tare(
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
 
+        logger.info(
+            "pressure tare requested: index=%s value=%s",
+            channel_index,
+            tare_value,
+        )
         return {
             "device": "pressure",
             "index": channel_index,
@@ -578,6 +583,7 @@ async def handle_tare(
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
 
+        logger.info("load tare requested: value=%s", tare_value)
         return {
             "device": "load",
             "value": tare_value,
