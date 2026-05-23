@@ -23,7 +23,6 @@ AUDIO_SHUTDOWN_TIMEOUT_SECONDS = 1.0
 class WavAudioRecorder:
     def __init__(self) -> None:
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "audio"
-        self._chunk_duration_ms = max(1, AUDIO_RECORD_CHUNK_SECONDS * 1000)
 
     async def run(self) -> None:
         if not AUDIO_RECORD_ENABLED:
@@ -46,9 +45,9 @@ class WavAudioRecorder:
         )
 
         while True:
-            chunk_start_ms = await self._wait_for_next_chunk_boundary()
-            self._delete_expired_chunks(chunk_start_ms)
-            path = self._data_dir / f"audio-{chunk_start_ms}.wav"
+            timestamp_ms = int(time.time() * 1000)
+            self._delete_expired_chunks(timestamp_ms)
+            path = self._data_dir / f"audio-{timestamp_ms}.wav"
 
             try:
                 await self._record_chunk(path)
@@ -60,27 +59,6 @@ class WavAudioRecorder:
             except Exception:
                 logger.exception("audio recording chunk failed")
                 await asyncio.sleep(1)
-
-    async def _wait_for_next_chunk_boundary(self) -> int:
-        now_ms = int(time.time() * 1000)
-        chunk_start_ms = self._next_chunk_boundary_ms(now_ms)
-        delay_seconds = max(0, (chunk_start_ms - now_ms) / 1000)
-
-        if delay_seconds > 0:
-            logger.info(
-                "audio recording waiting for aligned chunk boundary: start_ms=%s",
-                chunk_start_ms,
-            )
-            await asyncio.sleep(delay_seconds)
-
-        return chunk_start_ms
-
-    def _next_chunk_boundary_ms(self, timestamp_ms: int) -> int:
-        remainder = timestamp_ms % self._chunk_duration_ms
-        if remainder == 0:
-            return timestamp_ms
-
-        return timestamp_ms + self._chunk_duration_ms - remainder
 
     async def _record_chunk(self, path: Path) -> None:
         logger.info("audio recording chunk opened: path=%s", path)
