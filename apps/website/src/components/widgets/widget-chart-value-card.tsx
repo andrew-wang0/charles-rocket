@@ -13,6 +13,7 @@ type Props = {
   display: (value: number | undefined) => string;
   onTare?: () => void;
   tareDisabled?: boolean;
+  maxResetKey?: number;
   trackMax?: boolean;
 } & React.ComponentProps<typeof Card>;
 
@@ -24,10 +25,18 @@ export function WidgetChartValueCard({
   className,
   onTare,
   tareDisabled,
+  maxResetKey,
   trackMax,
   ...props
 }: Props) {
   const [max, setMax] = React.useState(value);
+
+  React.useEffect(() => {
+    if (!trackMax) return;
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMax(value);
+  }, [maxResetKey, trackMax, value]);
 
   React.useEffect(() => {
     if (value === undefined || !trackMax) return;

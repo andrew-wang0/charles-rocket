@@ -20,6 +20,7 @@ export function LoadWidget() {
   const latest = useStore((store) => store.loadLatestValue);
   const setChartPaused = useStore((store) => store.setLoadChartPaused);
   const setChartWindowMs = useStore((store) => store.setLoadChartWindowMs);
+  const [maxResetKey, setMaxResetKey] = React.useState(0);
   const [tarePending, setTarePending] = React.useState(false);
 
   async function handleTare() {
@@ -31,6 +32,7 @@ export function LoadWidget() {
       await client.tare({
         device: "load",
       });
+      setMaxResetKey((key) => key + 1);
     } catch (error) {
       console.error("Failed to tare load cell", error);
     } finally {
@@ -62,6 +64,7 @@ export function LoadWidget() {
             void handleTare();
           }}
           tareDisabled={latest === undefined || tarePending}
+          maxResetKey={maxResetKey}
           trackMax
         />
         {!hasLoadData ? <WidgetNoSignal className="flex-1" /> : <LoadWidgetChart />}
