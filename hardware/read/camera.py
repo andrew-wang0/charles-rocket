@@ -30,8 +30,10 @@ class MjpegRecorder:
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "video"
         self._file_handle: BinaryIO | None = None
         self._chunk_started_ms = 0
+        self._first_chunk_start_ms: int | None = None
         self._last_recorded_ms = 0
         self._record_interval_ms = max(1, int(1000 / max(1, VIDEO_RECORD_FPS)))
+        self._chunk_duration_ms = max(1, VIDEO_RECORD_CHUNK_SECONDS * 1000)
 
     def close(self) -> None:
         if self._file_handle is None:
@@ -54,27 +56,52 @@ class MjpegRecorder:
             self.close()
 
     def _record_frame(self, frame: bytes, timestamp_ms: int) -> None:
+        chunk_start_ms = self._get_chunk_start_ms(timestamp_ms)
+        if chunk_start_ms is None:
+            return
+
         if timestamp_ms - self._last_recorded_ms < self._record_interval_ms:
             return
 
         self._last_recorded_ms = timestamp_ms
-        self._ensure_chunk(timestamp_ms)
+        self._ensure_chunk(chunk_start_ms, timestamp_ms)
 
         if self._file_handle is not None:
             self._file_handle.write(frame)
 
-    def _ensure_chunk(self, timestamp_ms: int) -> None:
-        chunk_age_ms = timestamp_ms - self._chunk_started_ms
+    def _get_chunk_start_ms(self, timestamp_ms: int) -> int | None:
+        if self._first_chunk_start_ms is None:
+            self._first_chunk_start_ms = self._next_chunk_boundary_ms(timestamp_ms)
+            logger.info(
+                "video recording waiting for aligned chunk boundary: start_ms=%s",
+                self._first_chunk_start_ms,
+            )
 
-        if self._file_handle is not None and chunk_age_ms < VIDEO_RECORD_CHUNK_SECONDS * 1000:
+        if timestamp_ms < self._first_chunk_start_ms:
+            return None
+
+        return (timestamp_ms // self._chunk_duration_ms) * self._chunk_duration_ms
+
+    def _next_chunk_boundary_ms(self, timestamp_ms: int) -> int:
+        remainder = timestamp_ms % self._chunk_duration_ms
+        if remainder == 0:
+            return timestamp_ms
+
+        return timestamp_ms + self._chunk_duration_ms - remainder
+
+    def _ensure_chunk(self, chunk_start_ms: int, timestamp_ms: int) -> None:
+        if self._file_handle is not None and self._chunk_started_ms == chunk_start_ms:
+            return
+
+        if self._file_handle is not None and self._chunk_started_ms > chunk_start_ms:
             return
 
         self.close()
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._delete_expired_chunks(timestamp_ms)
 
-        self._chunk_started_ms = timestamp_ms
-        path = self._data_dir / f"camera-{timestamp_ms}.mjpg"
+        self._chunk_started_ms = chunk_start_ms
+        path = self._data_dir / f"camera-{chunk_start_ms}.mjpg"
         self._file_handle = path.open("ab", buffering=0)
         logger.info("video recording chunk opened: path=%s", path)
 
