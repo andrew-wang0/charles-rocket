@@ -61,11 +61,13 @@ class WavAudioRecorder:
                 await asyncio.sleep(1)
 
     async def _record_chunk(self, path: Path) -> None:
-        logger.info("audio recording chunk opened: path=%s", path)
+        logger.info("audio recording chunk opened: path=%s device=%s", path, AUDIO_RECORD_DEVICE)
         process = await asyncio.create_subprocess_exec(
             "arecord",
             "-D",
             AUDIO_RECORD_DEVICE,
+            "-t",
+            "wav",
             "-f",
             AUDIO_RECORD_SAMPLE_FORMAT,
             "-c",
