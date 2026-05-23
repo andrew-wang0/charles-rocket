@@ -2,5 +2,3 @@ __pycache__
 
 .venv
 server.log
-
-/data
