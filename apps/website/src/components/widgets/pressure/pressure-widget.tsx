@@ -18,10 +18,12 @@ import { WidgetNoSignal } from "../widget-no-signal";
 
 export function PressureWidget() {
   const hasPressureData = useStore((store) => store.pressureChartData.length > 0);
+  const chartPaused = useStore((store) => store.pressureChartPaused);
   const chartWindowMs = useStore((store) => store.pressureChartWindowMs);
   const pt1 = useStore((store) => store.pressureLatestValues[0]);
   const pt2 = useStore((store) => store.pressureLatestValues[1]);
   const pt3 = useStore((store) => store.pressureLatestValues[2]);
+  const setChartPaused = useStore((store) => store.setPressureChartPaused);
   const setChartWindowMs = useStore((store) => store.setPressureChartWindowMs);
   const latestValues = [pt1, pt2, pt3];
   const [pendingIndex, setPendingIndex] = React.useState<number | null>(null);
@@ -50,7 +52,9 @@ export function PressureWidget() {
         <CardAction>
           <WidgetChartRangeControl
             ariaLabel="Pressure chart history range"
+            onPausedChange={setChartPaused}
             onValueChange={setChartWindowMs}
+            paused={chartPaused}
             value={chartWindowMs}
           />
         </CardAction>

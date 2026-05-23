@@ -32,8 +32,12 @@ type Store = {
   loadLatestValue: number | undefined;
   loadChartWindowMs: number;
   pressureChartWindowMs: number;
+  loadChartPaused: boolean;
+  pressureChartPaused: boolean;
   setLoadChartWindowMs: (chartWindowMs: number) => void;
   setPressureChartWindowMs: (chartWindowMs: number) => void;
+  setLoadChartPaused: (paused: boolean) => void;
+  setPressureChartPaused: (paused: boolean) => void;
 
   hydrateReadings: (
     status: ReadingsStatus,
@@ -105,8 +109,12 @@ export const useStore = create<Store>((set) => ({
   loadLatestValue: undefined,
   loadChartWindowMs: DEFAULT_CHART_WINDOW_MS,
   pressureChartWindowMs: DEFAULT_CHART_WINDOW_MS,
+  loadChartPaused: false,
+  pressureChartPaused: false,
   setLoadChartWindowMs: (chartWindowMs) => set({ loadChartWindowMs: chartWindowMs }),
   setPressureChartWindowMs: (chartWindowMs) => set({ pressureChartWindowMs: chartWindowMs }),
+  setLoadChartPaused: (paused) => set({ loadChartPaused: paused }),
+  setPressureChartPaused: (paused) => set({ pressureChartPaused: paused }),
 
   hydrateReadings: (status, data) =>
     set((state) => {
@@ -121,12 +129,20 @@ export const useStore = create<Store>((set) => ({
       });
 
       return {
-        pressureChartData: buildPressureChartData(data.pressure),
-        pressureLatestTimes,
-        pressureLatestValues,
-        loadChartData: buildLoadChartData(data.load),
-        loadLatestTime: nextLoadLatest?.time ?? INITIAL_TIME,
-        loadLatestValue: nextLoadLatest?.value,
+        pressureChartData: state.pressureChartPaused
+          ? state.pressureChartData
+          : buildPressureChartData(data.pressure),
+        pressureLatestTimes: state.pressureChartPaused
+          ? state.pressureLatestTimes
+          : pressureLatestTimes,
+        pressureLatestValues: state.pressureChartPaused
+          ? state.pressureLatestValues
+          : pressureLatestValues,
+        loadChartData: state.loadChartPaused ? state.loadChartData : buildLoadChartData(data.load),
+        loadLatestTime: state.loadChartPaused
+          ? state.loadLatestTime
+          : (nextLoadLatest?.time ?? INITIAL_TIME),
+        loadLatestValue: state.loadChartPaused ? state.loadLatestValue : nextLoadLatest?.value,
         readingsStatus: areReadingsStatusesEqual(state.readingsStatus, status)
           ? state.readingsStatus
           : status,
@@ -155,12 +171,14 @@ export const useStore = create<Store>((set) => ({
       if (loadChanged) {
         const latestLoad = nextLoadReadings.at(-1);
 
-        nextState.loadChartData = appendLoadChartData(state.loadChartData, nextLoadReadings);
-        nextState.loadLatestTime = latestLoad?.time ?? state.loadLatestTime;
-        nextState.loadLatestValue = latestLoad?.value ?? state.loadLatestValue;
+        if (!state.loadChartPaused) {
+          nextState.loadChartData = appendLoadChartData(state.loadChartData, nextLoadReadings);
+          nextState.loadLatestTime = latestLoad?.time ?? state.loadLatestTime;
+          nextState.loadLatestValue = latestLoad?.value ?? state.loadLatestValue;
+        }
       }
 
-      if (pressureChanged) {
+      if (pressureChanged && !state.pressureChartPaused) {
         const pressureLatestTimes = state.pressureLatestTimes.slice();
         const pressureLatestValues = [...state.pressureLatestValues];
 

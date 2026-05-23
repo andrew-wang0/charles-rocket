@@ -86,7 +86,7 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
         />
         <Line
           dataKey="load"
-          type="natural"
+          type="linear"
           stroke="var(--color-load)"
           dot={false}
           connectNulls

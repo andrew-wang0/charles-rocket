@@ -15,8 +15,10 @@ import { WidgetNoSignal } from "../widget-no-signal";
 
 export function LoadWidget() {
   const hasLoadData = useStore((store) => store.loadChartData.length > 0);
+  const chartPaused = useStore((store) => store.loadChartPaused);
   const chartWindowMs = useStore((store) => store.loadChartWindowMs);
   const latest = useStore((store) => store.loadLatestValue);
+  const setChartPaused = useStore((store) => store.setLoadChartPaused);
   const setChartWindowMs = useStore((store) => store.setLoadChartWindowMs);
   const [tarePending, setTarePending] = React.useState(false);
 
@@ -43,7 +45,9 @@ export function LoadWidget() {
         <CardAction>
           <WidgetChartRangeControl
             ariaLabel="Load chart history range"
+            onPausedChange={setChartPaused}
             onValueChange={setChartWindowMs}
+            paused={chartPaused}
             value={chartWindowMs}
           />
         </CardAction>

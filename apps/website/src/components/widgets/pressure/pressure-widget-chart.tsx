@@ -144,7 +144,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
         <ChartLegend content={<ChartLegendContent />} />
         <Line
           dataKey="pt1"
-          type="natural"
+          type="linear"
           stroke="var(--color-pt1)"
           dot={false}
           connectNulls
@@ -152,7 +152,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
         />
         <Line
           dataKey="pt2"
-          type="natural"
+          type="linear"
           stroke="var(--color-pt2)"
           dot={false}
           connectNulls
@@ -160,7 +160,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
         />
         <Line
           dataKey="pt3"
-          type="natural"
+          type="linear"
           stroke="var(--color-pt3)"
           dot={false}
           connectNulls
