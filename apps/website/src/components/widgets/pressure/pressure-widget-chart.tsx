@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/chart";
 import { useStore } from "@/lib/store";
 import {
-  CHART_WINDOW_MS,
   createTickValues,
   formatAxisTick,
   formatChartValue,
@@ -77,14 +76,22 @@ function buildPressureAxisTicks(chartData: PressureChartPoint[]) {
 
 export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
   const chartData = useStore((store) => store.pressureChartData);
+  const chartWindowMs = useStore((store) => store.pressureChartWindowMs);
   const latestTime = chartData.at(-1)?.time ?? 0;
-  const windowStart = Math.max(0, latestTime - CHART_WINDOW_MS);
+  const windowStart = Math.max(0, latestTime - chartWindowMs);
+  const visibleChartData = React.useMemo(
+    () => chartData.filter((point) => point.time >= windowStart),
+    [chartData, windowStart],
+  );
 
   const tickValues = React.useMemo(
-    () => createTickValues(windowStart, latestTime),
-    [latestTime, windowStart],
+    () => createTickValues(windowStart, latestTime, chartWindowMs),
+    [chartWindowMs, latestTime, windowStart],
   );
-  const pressureAxisTicks = React.useMemo(() => buildPressureAxisTicks(chartData), [chartData]);
+  const pressureAxisTicks = React.useMemo(
+    () => buildPressureAxisTicks(visibleChartData),
+    [visibleChartData],
+  );
 
   return (
     <ChartContainer
@@ -93,7 +100,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
     >
       <LineChart
         accessibilityLayer
-        data={chartData}
+        data={visibleChartData}
         margin={{
           left: 4,
           right: 10,

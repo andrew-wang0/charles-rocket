@@ -3,9 +3,10 @@
 import React from "react";
 
 import { client } from "@/client";
-import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { loadChartConfig, LoadWidgetChart } from "@/components/widgets/load/load-widget-chart";
 import { WidgetCard } from "@/components/widgets/widget-card";
+import { WidgetChartRangeControl } from "@/components/widgets/widget-chart-range-control";
 import { WidgetChartValueCard } from "@/components/widgets/widget-chart-value-card";
 import { useStore } from "@/lib/store";
 import { formatChartValue } from "@/lib/util/chart";
@@ -14,7 +15,9 @@ import { WidgetNoSignal } from "../widget-no-signal";
 
 export function LoadWidget() {
   const hasLoadData = useStore((store) => store.loadChartData.length > 0);
+  const chartWindowMs = useStore((store) => store.loadChartWindowMs);
   const latest = useStore((store) => store.loadLatestValue);
+  const setChartWindowMs = useStore((store) => store.setLoadChartWindowMs);
   const [tarePending, setTarePending] = React.useState(false);
 
   async function handleTare() {
@@ -37,6 +40,13 @@ export function LoadWidget() {
     <WidgetCard size="sm">
       <CardHeader>
         <CardTitle>Load Monitor</CardTitle>
+        <CardAction>
+          <WidgetChartRangeControl
+            ariaLabel="Load chart history range"
+            onValueChange={setChartWindowMs}
+            value={chartWindowMs}
+          />
+        </CardAction>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
         <WidgetChartValueCard

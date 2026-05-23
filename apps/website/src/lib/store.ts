@@ -7,6 +7,7 @@ import {
   appendPressureChartData,
   buildLoadChartData,
   buildPressureChartData,
+  DEFAULT_CHART_WINDOW_MS,
   type LoadChartPoint,
   type PressureChartPoint,
 } from "@/lib/util/chart";
@@ -29,6 +30,10 @@ type Store = {
   loadChartData: LoadChartPoint[];
   loadLatestTime: number;
   loadLatestValue: number | undefined;
+  loadChartWindowMs: number;
+  pressureChartWindowMs: number;
+  setLoadChartWindowMs: (chartWindowMs: number) => void;
+  setPressureChartWindowMs: (chartWindowMs: number) => void;
 
   hydrateReadings: (
     status: ReadingsStatus,
@@ -98,6 +103,10 @@ export const useStore = create<Store>((set) => ({
   loadChartData: [],
   loadLatestTime: INITIAL_TIME,
   loadLatestValue: undefined,
+  loadChartWindowMs: DEFAULT_CHART_WINDOW_MS,
+  pressureChartWindowMs: DEFAULT_CHART_WINDOW_MS,
+  setLoadChartWindowMs: (chartWindowMs) => set({ loadChartWindowMs: chartWindowMs }),
+  setPressureChartWindowMs: (chartWindowMs) => set({ pressureChartWindowMs: chartWindowMs }),
 
   hydrateReadings: (status, data) =>
     set((state) => {

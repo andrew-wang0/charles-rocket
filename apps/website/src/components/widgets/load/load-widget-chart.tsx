@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/chart";
 import { useStore } from "@/lib/store";
 import {
-  CHART_WINDOW_MS,
   createTickValues,
   formatAxisTick,
   formatChartValue,
@@ -29,12 +28,17 @@ export const loadChartConfig = {
 
 export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
   const chartData = useStore((store) => store.loadChartData);
+  const chartWindowMs = useStore((store) => store.loadChartWindowMs);
   const latestTime = chartData.at(-1)?.time ?? 0;
-  const windowStart = Math.max(0, latestTime - CHART_WINDOW_MS);
+  const windowStart = Math.max(0, latestTime - chartWindowMs);
+  const visibleChartData = React.useMemo(
+    () => chartData.filter((point) => point.time >= windowStart),
+    [chartData, windowStart],
+  );
 
   const tickValues = React.useMemo(
-    () => createTickValues(windowStart, latestTime),
-    [latestTime, windowStart],
+    () => createTickValues(windowStart, latestTime, chartWindowMs),
+    [chartWindowMs, latestTime, windowStart],
   );
 
   return (
@@ -44,7 +48,7 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
     >
       <LineChart
         accessibilityLayer
-        data={chartData}
+        data={visibleChartData}
         margin={{
           left: 4,
           right: 10,

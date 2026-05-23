@@ -30,6 +30,9 @@ TRANSPORT_SAMPLE_INTERVAL_SECONDS = 1 / PRESSURE_TRANSPORT_RATE_HZ
 RAW_BUFFER_MAXLEN = PRESSURE_RAW_WINDOW_SECONDS * ADS1115_DATA_RATE
 TRANSPORT_BUFFER_MAXLEN = PRESSURE_TRANSPORT_WINDOW_SECONDS * PRESSURE_TRANSPORT_RATE_HZ
 THREAD_JOIN_TIMEOUT_SECONDS = 0.2
+PRESSURE_READ_MAX_ATTEMPTS = 3
+PRESSURE_READ_RETRY_DELAY_SECONDS = 0.002
+PRESSURE_FAILURE_LOG_INTERVAL = 60
 
 
 class PressureSampler:
@@ -44,6 +47,7 @@ class PressureSampler:
         self._ads: Any | None = None
         self._channels: list[Any] = []
         self._sensor_ok = [False] * PRESSURE_TRANSDUCER_COUNT
+        self._consecutive_failures = [0] * PRESSURE_TRANSDUCER_COUNT
         self._last_transport_sample_times = [0.0] * PRESSURE_TRANSDUCER_COUNT
         self._raw_buffers = [
             deque(maxlen=RAW_BUFFER_MAXLEN) for _ in range(PRESSURE_TRANSDUCER_COUNT)
@@ -207,19 +211,28 @@ class PressureSampler:
         channel_index = 0
 
         while not self._stop_event.is_set():
+            current_channel_index = channel_index
+            channel_index = (channel_index + 1) % PRESSURE_TRANSDUCER_COUNT
+
             try:
-                voltage = self._read_voltage(channel_index)
+                voltage = self._read_voltage(current_channel_index)
                 timestamp_ms = int(time.time() * 1000)
-                self._record_sample(channel_index, timestamp_ms, voltage)
-                channel_index = (channel_index + 1) % PRESSURE_TRANSDUCER_COUNT
-            except Exception:
-                logger.exception("failed to record pressure sample on channel=%s", channel_index)
-                with self._lock:
-                    self._sensor_ok[channel_index] = False
+                self._record_sample(current_channel_index, timestamp_ms, voltage)
+            except Exception as exc:
+                self._record_read_failure(current_channel_index, exc)
                 time.sleep(TRANSPORT_SAMPLE_INTERVAL_SECONDS)
 
     def _read_voltage(self, channel_index: int) -> float:
-        return float(self._channels[channel_index].voltage)
+        for attempt in range(1, PRESSURE_READ_MAX_ATTEMPTS + 1):
+            try:
+                return float(self._channels[channel_index].voltage)
+            except Exception:
+                if attempt >= PRESSURE_READ_MAX_ATTEMPTS:
+                    raise
+
+                time.sleep(PRESSURE_READ_RETRY_DELAY_SECONDS)
+
+        raise RuntimeError("pressure_read_unreachable")
 
     def _voltage_to_psi(self, voltage: float, zero_offset: float) -> float:
         psi = (voltage / PRESSURE_TRANSDUCER_MAX_VOLTAGE) * PRESSURE_TRANSDUCER_MAX_PSI
@@ -233,6 +246,8 @@ class PressureSampler:
         voltage: float,
     ) -> None:
         with self._lock:
+            previous_failures = self._consecutive_failures[channel_index]
+            self._consecutive_failures[channel_index] = 0
             psi = self._voltage_to_psi(voltage, self._zero_offsets[channel_index])
             self._sensor_ok[channel_index] = True
             self._raw_buffers[channel_index].append((timestamp_ms, psi))
@@ -244,4 +259,48 @@ class PressureSampler:
                 self._transport_buffers[channel_index].append((timestamp_ms, psi))
                 self._last_transport_sample_times[channel_index] = float(timestamp_ms)
 
+        if previous_failures > 0:
+            logger.info(
+                "pressure channel recovered: channel=%s missed_samples=%s",
+                channel_index,
+                previous_failures,
+            )
+
         self._file_handles[channel_index].write(f"{timestamp_ms},{psi:.6f},{voltage:.6f}\n")
+
+    def _record_read_failure(self, channel_index: int, exc: Exception) -> None:
+        with self._lock:
+            self._sensor_ok[channel_index] = False
+            self._consecutive_failures[channel_index] += 1
+            consecutive_failures = self._consecutive_failures[channel_index]
+
+        error_summary = f"{type(exc).__name__}: {exc}"
+
+        if consecutive_failures == 1:
+            logger.warning(
+                "failed to record pressure sample: channel=%s error=%s",
+                channel_index,
+                error_summary,
+            )
+            logger.debug(
+                "pressure sample failure details: channel=%s",
+                channel_index,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            return
+
+        if consecutive_failures % PRESSURE_FAILURE_LOG_INTERVAL == 0:
+            logger.warning(
+                "pressure sample still failing: channel=%s consecutive_failures=%s error=%s",
+                channel_index,
+                consecutive_failures,
+                error_summary,
+            )
+            return
+
+        logger.debug(
+            "pressure sample failed: channel=%s consecutive_failures=%s error=%s",
+            channel_index,
+            consecutive_failures,
+            error_summary,
+        )

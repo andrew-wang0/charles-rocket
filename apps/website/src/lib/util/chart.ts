@@ -1,8 +1,15 @@
 import type { TimedReadings } from "@/lib/readings";
 
-export const CHART_WINDOW_MS = 30_000;
-export const CHART_TICK_INTERVAL_MS = 5_000;
+export const DEFAULT_CHART_WINDOW_MS = 30_000;
+export const MAX_CHART_HISTORY_MS = 10 * 60_000;
 export const CHART_BUCKET_MS = 50;
+
+export const CHART_WINDOW_OPTIONS = [
+  { label: "30s", value: 30_000 },
+  { label: "1m", value: 60_000 },
+  { label: "5m", value: 5 * 60_000 },
+  { label: "10m", value: MAX_CHART_HISTORY_MS },
+] as const;
 
 const PRESSURE_KEYS = ["pt1", "pt2", "pt3"] as const;
 type PressureKey = (typeof PRESSURE_KEYS)[number];
@@ -38,13 +45,21 @@ export function formatAxisTick(value: number) {
   return normalized.toFixed(1);
 }
 
-export function createTickValues(windowStart: number, latestTime: number) {
-  const tickCount = CHART_WINDOW_MS / CHART_TICK_INTERVAL_MS;
+export function createTickValues(windowStart: number, latestTime: number, windowMs: number) {
+  const tickInterval = getChartTickInterval(windowMs);
+  const tickCount = Math.ceil(windowMs / tickInterval);
 
   return Array.from({ length: tickCount + 1 }, (_, index) => {
-    const tick = windowStart + index * CHART_TICK_INTERVAL_MS;
+    const tick = windowStart + index * tickInterval;
     return Math.min(tick, latestTime);
   });
+}
+
+function getChartTickInterval(windowMs: number) {
+  if (windowMs <= 30_000) return 5_000;
+  if (windowMs <= 60_000) return 10_000;
+  if (windowMs <= 5 * 60_000) return 60_000;
+  return 2 * 60_000;
 }
 
 function getChartBucketTime(time: number) {
@@ -111,8 +126,8 @@ function createPressureChartPoint(time: number): PressureChartPoint {
   };
 }
 
-function trimChartWindow<T extends { time: number }>(chartData: T[], latestTime: number) {
-  const cutoff = latestTime - CHART_WINDOW_MS;
+export function trimChartHistory<T extends { time: number }>(chartData: T[], latestTime: number) {
+  const cutoff = latestTime - MAX_CHART_HISTORY_MS;
   let firstVisibleIndex = 0;
 
   while (chartData[firstVisibleIndex]?.time < cutoff) {
@@ -129,10 +144,13 @@ function replaceLastChartPoint<T>(chartData: T[], point: T) {
 }
 
 export function buildLoadChartData(loadReadings: TimedReadings): LoadChartPoint[] {
-  return bucketReadings(loadReadings).map((reading) => ({
+  const chartData = bucketReadings(loadReadings).map((reading) => ({
     time: reading.time,
     load: reading.value,
   }));
+  const latestTime = chartData.at(-1)?.time;
+
+  return latestTime === undefined ? chartData : trimChartHistory(chartData, latestTime);
 }
 
 export function buildPressureChartData(pressureReadings: TimedReadings[]): PressureChartPoint[] {
@@ -145,12 +163,15 @@ export function buildPressureChartData(pressureReadings: TimedReadings[]): Press
     (readings) => new Map(readings.map((reading) => [reading.time, reading.value])),
   );
 
-  return timestamps.map((timestamp) => ({
+  const chartData = timestamps.map((timestamp) => ({
     time: timestamp,
     pt1: valueMaps[0]?.get(timestamp) ?? null,
     pt2: valueMaps[1]?.get(timestamp) ?? null,
     pt3: valueMaps[2]?.get(timestamp) ?? null,
   }));
+  const latestTime = chartData.at(-1)?.time;
+
+  return latestTime === undefined ? chartData : trimChartHistory(chartData, latestTime);
 }
 
 export function appendLoadChartData(chartData: LoadChartPoint[], incomingReadings: TimedReadings) {
@@ -173,7 +194,7 @@ export function appendLoadChartData(chartData: LoadChartPoint[], incomingReading
     }
 
     nextChartData = [
-      ...trimChartWindow(nextChartData, bucketTime),
+      ...trimChartHistory(nextChartData, bucketTime),
       {
         time: bucketTime,
         load: reading.value,
@@ -220,7 +241,7 @@ export function appendPressureChartData(
     const nextPoint = createPressureChartPoint(bucketTime);
     nextPoint[key] = reading.value;
 
-    nextChartData = [...trimChartWindow(nextChartData, bucketTime), nextPoint];
+    nextChartData = [...trimChartHistory(nextChartData, bucketTime), nextPoint];
   }
 
   return nextChartData;
@@ -228,5 +249,10 @@ export function appendPressureChartData(
 
 export function formatRelativeTick(value: number, latestTime: number) {
   const secondsFromLatest = Math.round((value - latestTime) / 1000);
+
+  if (Math.abs(secondsFromLatest) >= 60 && secondsFromLatest % 60 === 0) {
+    return `${secondsFromLatest / 60}m`;
+  }
+
   return String(secondsFromLatest);
 }

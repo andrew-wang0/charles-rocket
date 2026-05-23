@@ -6,7 +6,7 @@ import { PRESSURE_TRANSDUCER_COUNT, SERVO_COUNT } from "@/lib/constants";
 import { IgnitionState } from "@/types/ignition";
 import { ServoState } from "@/types/servo";
 
-const HISTORY_WINDOW_MS = 30_000;
+const HISTORY_WINDOW_MS = 10 * 60_000;
 const SAMPLE_INTERVAL_MS = 50;
 const LOAD_SENSOR_MAX_LB = 200;
 const DEFAULT_PORT = 8765;
