@@ -5,7 +5,8 @@ import importlib
 import logging
 import threading
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, BinaryIO
 
 from config import (
     VIDEO_CAPTURE_BUFFER_SIZE,
@@ -13,11 +14,95 @@ from config import (
     VIDEO_DEVICE_PATH,
     VIDEO_FRAME_HEIGHT,
     VIDEO_FRAME_WIDTH,
+    VIDEO_RECORD_CHUNK_SECONDS,
+    VIDEO_RECORD_ENABLED,
+    VIDEO_RECORD_FPS,
+    VIDEO_RECORD_WINDOW_SECONDS,
     VIDEO_RETRY_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
 THREAD_JOIN_TIMEOUT_SECONDS = 0.2
+
+
+class MjpegRecorder:
+    def __init__(self) -> None:
+        self._data_dir = Path(__file__).resolve().parents[1] / "data" / "video"
+        self._file_handle: BinaryIO | None = None
+        self._chunk_started_ms = 0
+        self._last_recorded_ms = 0
+        self._record_interval_ms = max(1, int(1000 / max(1, VIDEO_RECORD_FPS)))
+
+    def close(self) -> None:
+        if self._file_handle is None:
+            return
+
+        with contextlib.suppress(Exception):
+            self._file_handle.flush()
+            self._file_handle.close()
+
+        self._file_handle = None
+
+    def record_frame(self, frame: bytes, timestamp_ms: int) -> None:
+        if not VIDEO_RECORD_ENABLED:
+            return
+
+        try:
+            self._record_frame(frame, timestamp_ms)
+        except Exception:
+            logger.exception("failed to record video frame")
+            self.close()
+
+    def _record_frame(self, frame: bytes, timestamp_ms: int) -> None:
+        if timestamp_ms - self._last_recorded_ms < self._record_interval_ms:
+            return
+
+        self._last_recorded_ms = timestamp_ms
+        self._ensure_chunk(timestamp_ms)
+
+        if self._file_handle is not None:
+            self._file_handle.write(frame)
+
+    def _ensure_chunk(self, timestamp_ms: int) -> None:
+        chunk_age_ms = timestamp_ms - self._chunk_started_ms
+
+        if self._file_handle is not None and chunk_age_ms < VIDEO_RECORD_CHUNK_SECONDS * 1000:
+            return
+
+        self.close()
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._delete_expired_chunks(timestamp_ms)
+
+        self._chunk_started_ms = timestamp_ms
+        path = self._data_dir / f"camera-{timestamp_ms}.mjpg"
+        self._file_handle = path.open("ab", buffering=0)
+        logger.info("video recording chunk opened: path=%s", path)
+
+    def _delete_expired_chunks(self, now_ms: int) -> None:
+        cutoff_ms = now_ms - VIDEO_RECORD_WINDOW_SECONDS * 1000
+
+        for path in self._data_dir.glob("camera-*.mjpg"):
+            timestamp_ms = self._parse_chunk_timestamp(path)
+            if timestamp_ms is None or timestamp_ms >= cutoff_ms:
+                continue
+
+            try:
+                path.unlink()
+                logger.info("deleted expired video recording chunk: path=%s", path)
+            except Exception:
+                logger.exception("failed to delete expired video recording chunk: path=%s", path)
+
+    def _parse_chunk_timestamp(self, path: Path) -> int | None:
+        name = path.stem
+        prefix = "camera-"
+
+        if not name.startswith(prefix):
+            return None
+
+        try:
+            return int(name[len(prefix):])
+        except ValueError:
+            return None
 
 
 class CameraReader:
@@ -32,6 +117,7 @@ class CameraReader:
         self._capture: Any | None = None
         self._latest_frame: bytes | None = None
         self._last_frame_time_ms = 0
+        self._recorder = MjpegRecorder()
 
         try:
             self._cv2 = importlib.import_module("cv2")
@@ -59,6 +145,7 @@ class CameraReader:
             self._thread = None
 
         self._close_capture()
+        self._recorder.close()
 
     def status_payload(self) -> bool:
         with self._lock:
@@ -190,6 +277,7 @@ class CameraReader:
                 with self._lock:
                     self._latest_frame = encoded
                     self._last_frame_time_ms = now_ms
+                self._recorder.record_frame(encoded, now_ms)
             except Exception as exc:
                 self.error = str(exc)
                 logger.exception("camera capture failed")
