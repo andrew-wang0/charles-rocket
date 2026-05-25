@@ -15,13 +15,7 @@ import {
 import { client } from "@/client";
 import { Button } from "@/components/ui/button";
 import type { ChartConfig } from "@/components/ui/chart";
-import {
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@/components/ui/chart";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import {
   Dialog,
   DialogClose,
@@ -149,14 +143,23 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   const [domain, setDomain] = React.useState<readonly [number, number] | null>(null);
   const [startInput, setStartInput] = React.useState("");
   const [endInput, setEndInput] = React.useState("");
+  const [hiddenSeries, setHiddenSeries] = React.useState<Set<string>>(() => new Set());
   const [selectionStart, setSelectionStart] = React.useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = React.useState<number | null>(null);
 
   const data = (kind === "pressure" ? pressureData : loadData) as InspectionPoint[];
+  const visibleSeries = React.useMemo(
+    () => copy.series.filter((entry) => !hiddenSeries.has(entry.key)),
+    [copy.series, hiddenSeries],
+  );
   const fullDomain = React.useMemo(() => getDomain(data, queryDomain), [data, queryDomain]);
   const activeDomain = domain ?? fullDomain;
   const visibleData = React.useMemo(() => getVisibleData(data, activeDomain), [activeDomain, data]);
   const referenceValues = React.useMemo(
+    () => getReferenceValues(visibleData, visibleSeries),
+    [visibleData, visibleSeries],
+  );
+  const legendValues = React.useMemo(
     () => getReferenceValues(visibleData, copy.series),
     [copy.series, visibleData],
   );
@@ -255,6 +258,20 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
     void loadHistory([start, end]);
   }
 
+  function toggleSeries(key: string) {
+    setHiddenSeries((current) => {
+      const next = new Set(current);
+
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+
+      return next;
+    });
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -335,96 +352,133 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
               No recorded data
             </div>
           ) : (
-            <ChartContainer
-              config={copy.config as ChartConfig}
-              className="bg-card w-full overflow-hidden border p-2"
-            >
-              <LineChart
-                accessibilityLayer
-                data={visibleData}
-                margin={{ top: 10, right: 18, bottom: 2, left: 6 }}
-                onMouseDown={(event) => beginSelection(event.activeLabel)}
-                onMouseMove={(event) => updateSelection(event.activeLabel)}
-                onMouseUp={finishSelection}
+            <div className="bg-card grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] overflow-hidden border p-2">
+              <ChartContainer
+                config={copy.config as ChartConfig}
+                className="aspect-auto h-full min-h-0 w-full"
               >
-                <CartesianGrid vertical={false} />
-                <YAxis
-                  axisLine={false}
-                  domain={["dataMin", "dataMax"]}
-                  tickLine={false}
-                  tickMargin={8}
-                  tickFormatter={(value) => formatChartValue(Number(value), copy.precision)}
-                />
-                <XAxis
-                  allowDecimals={false}
-                  axisLine={false}
-                  dataKey="time"
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(value) => formatClockTimestamp(Number(value))}
-                  tickLine={false}
-                  tickMargin={8}
-                  type="number"
-                />
-                <ChartTooltip
-                  cursor={{ stroke: "var(--border)" }}
-                  content={
-                    <ChartTooltipContent
-                      indicator="line"
-                      labelFormatter={(_label, payload) => {
-                        const time = payload.at(0)?.payload?.time;
-                        return typeof time === "number" ? formatClockTimestamp(time) : null;
-                      }}
-                      valueFormatter={(value) =>
-                        `${formatChartValue(Number(value), copy.precision)} ${copy.unit}`
-                      }
+                <LineChart
+                  accessibilityLayer
+                  data={visibleData}
+                  margin={{ top: 10, right: 18, bottom: 2, left: 6 }}
+                  onMouseDown={(event) => beginSelection(event.activeLabel)}
+                  onMouseMove={(event) => updateSelection(event.activeLabel)}
+                  onMouseUp={finishSelection}
+                >
+                  <CartesianGrid vertical={false} />
+                  <YAxis
+                    axisLine={false}
+                    domain={["dataMin", "dataMax"]}
+                    tickLine={false}
+                    tickMargin={8}
+                    tickFormatter={(value) => formatChartValue(Number(value), copy.precision)}
+                  />
+                  <XAxis
+                    allowDecimals={false}
+                    axisLine={false}
+                    dataKey="time"
+                    domain={["dataMin", "dataMax"]}
+                    tickFormatter={(value) => formatClockTimestamp(Number(value))}
+                    tickLine={false}
+                    tickMargin={8}
+                    type="number"
+                  />
+                  <ChartTooltip
+                    cursor={{ stroke: "var(--border)" }}
+                    content={
+                      <ChartTooltipContent
+                        indicator="line"
+                        labelFormatter={(_label, payload) => {
+                          const time = payload.at(0)?.payload?.time;
+                          return typeof time === "number" ? formatClockTimestamp(time) : null;
+                        }}
+                        valueFormatter={(value) =>
+                          `${formatChartValue(Number(value), copy.precision)} ${copy.unit}`
+                        }
+                      />
+                    }
+                  />
+                  {referenceValues.map((entry) => (
+                    <React.Fragment key={entry.key}>
+                      {entry.min !== undefined ? (
+                        <ReferenceLine
+                          y={entry.min}
+                          stroke={entry.color}
+                          strokeDasharray="4 4"
+                          strokeOpacity={0.38}
+                        />
+                      ) : null}
+                      {entry.max !== undefined ? (
+                        <ReferenceLine
+                          y={entry.max}
+                          stroke={entry.color}
+                          strokeDasharray="4 4"
+                          strokeOpacity={0.38}
+                        />
+                      ) : null}
+                    </React.Fragment>
+                  ))}
+                  {visibleSeries.map((entry) => (
+                    <Line
+                      key={entry.key}
+                      connectNulls
+                      dataKey={entry.key}
+                      dot={false}
+                      isAnimationActive={false}
+                      stroke={`var(--color-${entry.key})`}
+                      strokeWidth={1.5}
+                      type="linear"
                     />
-                  }
-                />
-                <ChartLegend content={<ChartLegendContent />} />
-                {referenceValues.map((entry) => (
-                  <React.Fragment key={entry.key}>
-                    {entry.min !== undefined ? (
-                      <ReferenceLine
-                        y={entry.min}
-                        stroke={entry.color}
-                        strokeDasharray="4 4"
-                        strokeOpacity={0.38}
-                      />
-                    ) : null}
-                    {entry.max !== undefined ? (
-                      <ReferenceLine
-                        y={entry.max}
-                        stroke={entry.color}
-                        strokeDasharray="4 4"
-                        strokeOpacity={0.38}
-                      />
-                    ) : null}
-                  </React.Fragment>
-                ))}
-                {copy.series.map((entry) => (
-                  <Line
-                    key={entry.key}
-                    connectNulls
-                    dataKey={entry.key}
-                    dot={false}
-                    isAnimationActive={false}
-                    stroke={`var(--color-${entry.key})`}
-                    strokeWidth={1.5}
-                    type="linear"
-                  />
-                ))}
-                {selectionStart !== null && selectionEnd !== null ? (
-                  <ReferenceArea
-                    x1={Math.min(selectionStart, selectionEnd)}
-                    x2={Math.max(selectionStart, selectionEnd)}
-                    stroke="var(--foreground)"
-                    strokeOpacity={0.25}
-                    fill="var(--foreground)"
-                    fillOpacity={0.08}
-                  />
-                ) : null}
-              </LineChart>
-            </ChartContainer>
+                  ))}
+                  {selectionStart !== null && selectionEnd !== null ? (
+                    <ReferenceArea
+                      x1={Math.min(selectionStart, selectionEnd)}
+                      x2={Math.max(selectionStart, selectionEnd)}
+                      stroke="var(--foreground)"
+                      strokeOpacity={0.25}
+                      fill="var(--foreground)"
+                      fillOpacity={0.08}
+                    />
+                  ) : null}
+                </LineChart>
+              </ChartContainer>
+              <div
+                aria-label={`${copy.title} series`}
+                className="flex shrink-0 items-start justify-center gap-5 pt-3 text-xs"
+                role="group"
+              >
+                {legendValues.map((entry) => {
+                  const hidden = hiddenSeries.has(entry.key);
+
+                  return (
+                    <button
+                      key={entry.key}
+                      aria-pressed={!hidden}
+                      className={`text-foreground flex cursor-pointer flex-col items-center gap-1 border-0 bg-transparent p-0 transition-opacity hover:opacity-75 ${
+                        hidden ? "opacity-55" : "opacity-100"
+                      }`}
+                      onClick={() => toggleSeries(entry.key)}
+                      type="button"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-xs border"
+                          style={{
+                            backgroundColor: hidden ? "transparent" : entry.color,
+                            borderColor: entry.color,
+                          }}
+                        />
+                        {entry.label}
+                      </span>
+                      <span className="text-muted-foreground text-[14px] tabular-nums">
+                        {formatChartValue(entry.min, copy.precision)} /{" "}
+                        {formatChartValue(entry.max, copy.precision)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       </DialogContent>
