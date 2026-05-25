@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  MagnifyingGlassIcon,
-  MagnifyingGlassMinusIcon,
-  SpinnerGapIcon,
-  XIcon,
-} from "@phosphor-icons/react";
+import { ArrowsOutIcon, MagnifyingGlassIcon, SpinnerGapIcon, XIcon } from "@phosphor-icons/react";
 import React from "react";
 import {
   CartesianGrid,
@@ -31,7 +26,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -109,7 +103,6 @@ function getInspectionCopy(kind: GraphKind) {
   if (kind === "pressure") {
     return {
       title: "PT Monitor",
-      description: "Inspect pressure graph",
       unit: "PSI",
       precision: 1,
       config: pressureChartConfig,
@@ -119,7 +112,6 @@ function getInspectionCopy(kind: GraphKind) {
 
   return {
     title: "Load Monitor",
-    description: "Inspect load graph",
     unit: "lb",
     precision: 2,
     config: loadChartConfig,
@@ -265,11 +257,13 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] lg:h-[86dvh] lg:max-w-6xl">
+      <DialogContent
+        className="h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] lg:h-[86dvh] lg:max-w-6xl"
+        aria-describedby={undefined}
+      >
         <DialogHeader>
           <div className="min-w-0">
             <DialogTitle>{copy.title}</DialogTitle>
-            <DialogDescription className="sr-only">{copy.description}</DialogDescription>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <DialogClose asChild>
@@ -314,15 +308,16 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
               Search
             </Button>
             <Button
+              aria-label="Zoom out"
               className="self-end"
               disabled={!hasZoom}
               onClick={resetZoom}
-              size="default"
+              size="icon"
+              title="Zoom out"
               type="button"
               variant="outline"
             >
-              <MagnifyingGlassMinusIcon data-icon="inline-start" />
-              Zoom out
+              <ArrowsOutIcon />
             </Button>
           </div>
 
@@ -342,7 +337,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
           ) : (
             <ChartContainer
               config={copy.config as ChartConfig}
-              className="bg-card min-h-0 w-full flex-1 overflow-hidden border p-2"
+              className="bg-card w-full overflow-hidden border p-2"
             >
               <LineChart
                 accessibilityLayer
@@ -355,17 +350,16 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
                 <CartesianGrid vertical={false} />
                 <YAxis
                   axisLine={false}
+                  domain={["dataMin", "dataMax"]}
                   tickLine={false}
                   tickMargin={8}
-                  width={64}
                   tickFormatter={(value) => formatChartValue(Number(value), copy.precision)}
                 />
                 <XAxis
                   allowDecimals={false}
                   axisLine={false}
                   dataKey="time"
-                  domain={activeDomain}
-                  minTickGap={32}
+                  domain={["dataMin", "dataMax"]}
                   tickFormatter={(value) => formatClockTimestamp(Number(value))}
                   tickLine={false}
                   tickMargin={8}
@@ -391,6 +385,12 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
                   <React.Fragment key={entry.key}>
                     {entry.min !== undefined ? (
                       <ReferenceLine
+                        label={{
+                          value: formatChartValue(entry.min, copy.precision),
+                          position: "left",
+                          fill: entry.color,
+                          fontSize: 10,
+                        }}
                         y={entry.min}
                         stroke={entry.color}
                         strokeDasharray="4 4"
@@ -399,6 +399,12 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
                     ) : null}
                     {entry.max !== undefined ? (
                       <ReferenceLine
+                        label={{
+                          value: formatChartValue(entry.max, copy.precision),
+                          position: "left",
+                          fill: entry.color,
+                          fontSize: 10,
+                        }}
                         y={entry.max}
                         stroke={entry.color}
                         strokeDasharray="4 4"
