@@ -23,6 +23,8 @@ from config import (
 
 logger = logging.getLogger(__name__)
 THREAD_JOIN_TIMEOUT_SECONDS = 0.2
+JPEG_START_MARKER = b"\xff\xd8"
+JPEG_END_MARKER = b"\xff\xd9"
 
 
 class MjpegRecorder:
@@ -187,19 +189,44 @@ class CameraReader:
         if len(frame_bytes) < 4:
             return None
 
-        if frame_bytes[:2] != b"\xff\xd8" or frame_bytes[-2:] != b"\xff\xd9":
+        start = frame_bytes.find(JPEG_START_MARKER)
+        if start < 0:
             return None
 
-        return frame_bytes
+        end = frame_bytes.find(JPEG_END_MARKER, start + len(JPEG_START_MARKER))
+        if end < 0:
+            return None
+
+        return frame_bytes[start:end + len(JPEG_END_MARKER)]
+
+    def _encode_decoded_frame(self, frame: Any) -> bytes | None:
+        if self._cv2 is None or not hasattr(frame, "shape"):
+            return None
+
+        if len(frame.shape) < 2:
+            return None
+
+        if frame.shape[0] <= 1 or frame.shape[1] <= 1:
+            return None
+
+        ok, encoded = self._cv2.imencode(".jpg", frame)
+        if not ok or not hasattr(encoded, "tobytes"):
+            return None
+
+        return encoded.tobytes()
 
     def _extract_mjpeg_frame(self, frame: Any) -> bytes:
         direct_jpeg = self._extract_direct_jpeg(frame)
         if direct_jpeg is not None:
             return direct_jpeg
 
+        encoded_frame = self._encode_decoded_frame(frame)
+        if encoded_frame is not None:
+            return encoded_frame
+
         raise RuntimeError(
             "camera_mjpeg_passthrough_unavailable:"
-            "backend did not return encoded JPEG frames"
+            "backend did not return encoded or encodable JPEG frames"
         )
 
     def _open_capture(self) -> bool:
@@ -285,6 +312,4 @@ class CameraReader:
                     self._latest_frame = None
                     self._last_frame_time_ms = 0
                 self._close_capture()
-                if "camera_mjpeg_passthrough_unavailable" in self.error:
-                    return
                 time.sleep(VIDEO_RETRY_SECONDS)
