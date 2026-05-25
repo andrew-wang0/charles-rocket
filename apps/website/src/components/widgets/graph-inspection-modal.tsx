@@ -93,6 +93,47 @@ function getVisibleData<TPoint extends { time: number }>(
   return data.filter((point) => point.time >= domain[0] && point.time <= domain[1]);
 }
 
+function downsampleReadings<T>(readings: T[], maxPoints: number) {
+  if (readings.length <= maxPoints) return readings;
+
+  return Array.from({ length: maxPoints }, (_, index) => {
+    return readings[roundToNearestIndex(index, readings.length, maxPoints)];
+  });
+}
+
+function roundToNearestIndex(index: number, totalPoints: number, maxPoints: number) {
+  return Math.round((index * (totalPoints - 1)) / (maxPoints - 1));
+}
+
+function downsampleChartData(
+  data: InspectionPoint[],
+  series: SeriesConfig[],
+  maxPointsPerLine: number,
+) {
+  if (series.length === 0) return [];
+
+  const pointsByTime = new Map<number, InspectionPoint>();
+
+  for (const entry of series) {
+    const readings = data
+      .map((point) => ({
+        time: point.time,
+        value: point[entry.key],
+      }))
+      .filter((point): point is { time: number; value: number } => {
+        return typeof point.value === "number";
+      });
+
+    for (const reading of downsampleReadings(readings, maxPointsPerLine)) {
+      const point = pointsByTime.get(reading.time) ?? { time: reading.time };
+      point[entry.key] = reading.value;
+      pointsByTime.set(reading.time, point);
+    }
+  }
+
+  return Array.from(pointsByTime.values()).sort((left, right) => left.time - right.time);
+}
+
 function getInspectionCopy(kind: GraphKind) {
   if (kind === "pressure") {
     return {
@@ -155,6 +196,10 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   const fullDomain = React.useMemo(() => getDomain(data, queryDomain), [data, queryDomain]);
   const activeDomain = domain ?? fullDomain;
   const visibleData = React.useMemo(() => getVisibleData(data, activeDomain), [activeDomain, data]);
+  const renderData = React.useMemo(
+    () => downsampleChartData(visibleData, visibleSeries, INSPECTION_MAX_POINTS_PER_LINE),
+    [visibleData, visibleSeries],
+  );
   const referenceValues = React.useMemo(
     () => getReferenceValues(visibleData, visibleSeries),
     [visibleData, visibleSeries],
@@ -174,7 +219,6 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
         history: true,
         startTime: range[0],
         endTime: range[1],
-        maxPoints: INSPECTION_MAX_POINTS_PER_LINE,
       });
 
       setPressureData(buildRawPressureChartData(result.data.pressure));
@@ -359,7 +403,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
               >
                 <LineChart
                   accessibilityLayer
-                  data={visibleData}
+                  data={renderData}
                   margin={{ top: 10, right: 18, bottom: 2, left: 6 }}
                   onMouseDown={(event) => beginSelection(event.activeLabel)}
                   onMouseMove={(event) => updateSelection(event.activeLabel)}

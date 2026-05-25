@@ -200,7 +200,9 @@ class LoadSampler:
         max_points: int | None = None,
     ) -> list[dict[str, float | int]]:
         should_query_files = start_time is not None or end_time is not None
-        limit = max_points or DEFAULT_HISTORY_MAX_POINTS
+        limit = max_points if max_points is not None else (
+            DEFAULT_HISTORY_MAX_POINTS if not should_query_files else None
+        )
         history = self._read_data_files(start_time, end_time) if should_query_files else []
 
         with self._lock:
@@ -213,7 +215,11 @@ class LoadSampler:
 
         return [
             {"time": timestamp_ms, "value": pounds}
-            for timestamp_ms, pounds in self._downsample_history(history, limit)
+            for timestamp_ms, pounds in (
+                self._downsample_history(history, limit)
+                if limit is not None
+                else history
+            )
         ]
 
     def latest_payload(self) -> list[dict[str, float | int]]:
