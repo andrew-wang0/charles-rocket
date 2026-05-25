@@ -385,12 +385,6 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
                   <React.Fragment key={entry.key}>
                     {entry.min !== undefined ? (
                       <ReferenceLine
-                        label={{
-                          value: formatChartValue(entry.min, copy.precision),
-                          position: "left",
-                          fill: entry.color,
-                          fontSize: 10,
-                        }}
                         y={entry.min}
                         stroke={entry.color}
                         strokeDasharray="4 4"
@@ -399,12 +393,6 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
                     ) : null}
                     {entry.max !== undefined ? (
                       <ReferenceLine
-                        label={{
-                          value: formatChartValue(entry.max, copy.precision),
-                          position: "left",
-                          fill: entry.color,
-                          fontSize: 10,
-                        }}
                         y={entry.max}
                         stroke={entry.color}
                         strokeDasharray="4 4"
