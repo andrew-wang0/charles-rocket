@@ -21,9 +21,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={cn("font-mono", jetbrainsMono.variable)}>
-      <body
-        className={cn(jetbrainsMono.className, "flex h-dvh flex-col overflow-hidden select-none")}
-      >
+      <body className={cn(jetbrainsMono.className, "flex h-dvh flex-col overflow-hidden")}>
         <DataReader />
         <Header />
         {children}

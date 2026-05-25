@@ -55,6 +55,32 @@ export function createTickValues(windowStart: number, latestTime: number, window
   });
 }
 
+export function formatAbsoluteTimestamp(value: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+  }).format(new Date(value));
+}
+
+export function formatClockTimestamp(value: number) {
+  const date = new Date(value);
+  const milliseconds = date.getMilliseconds().toString().padStart(3, "0");
+  return `${date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })}.${milliseconds}`;
+}
+
+export function formatDateTime(value: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(new Date(value));
+}
+
 function getChartTickInterval(windowMs: number) {
   if (windowMs <= 30_000) return 5_000;
   if (windowMs <= 60_000) return 10_000;
@@ -172,6 +198,30 @@ export function buildPressureChartData(pressureReadings: TimedReadings[]): Press
   const latestTime = chartData.at(-1)?.time;
 
   return latestTime === undefined ? chartData : trimChartHistory(chartData, latestTime);
+}
+
+export function buildRawPressureChartData(pressureReadings: TimedReadings[]): PressureChartPoint[] {
+  const timestamps = mergeSortedReadingTimes(pressureReadings);
+
+  if (timestamps.length === 0) return [];
+
+  const valueMaps = pressureReadings.map(
+    (readings) => new Map(readings.map((reading) => [reading.time, reading.value])),
+  );
+
+  return timestamps.map((timestamp) => ({
+    time: timestamp,
+    pt1: valueMaps[0]?.get(timestamp) ?? null,
+    pt2: valueMaps[1]?.get(timestamp) ?? null,
+    pt3: valueMaps[2]?.get(timestamp) ?? null,
+  }));
+}
+
+export function buildRawLoadChartData(loadReadings: TimedReadings): LoadChartPoint[] {
+  return loadReadings.map((reading) => ({
+    time: reading.time,
+    load: reading.value,
+  }));
 }
 
 export function appendLoadChartData(chartData: LoadChartPoint[], incomingReadings: TimedReadings) {

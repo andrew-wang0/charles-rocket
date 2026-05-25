@@ -7,7 +7,10 @@ import { timedReadings } from "@/lib/readings";
 export const readings = method({
   paramsSchema: z
     .object({
+      endTime: z.number().int().nonnegative().optional(),
       history: z.boolean().optional(),
+      maxPoints: z.number().int().min(100).max(5_000).optional(),
+      startTime: z.number().int().nonnegative().optional(),
     })
     .optional(),
   resultSchema: z.object({

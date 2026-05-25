@@ -1,9 +1,12 @@
 "use client";
 
+import { ChartPolarIcon } from "@phosphor-icons/react";
 import React from "react";
 
 import { client } from "@/client";
+import { Button } from "@/components/ui/button";
 import { CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GraphInspectionModal } from "@/components/widgets/graph-inspection-modal";
 import { loadChartConfig, LoadWidgetChart } from "@/components/widgets/load/load-widget-chart";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { WidgetChartRangeControl } from "@/components/widgets/widget-chart-range-control";
@@ -36,12 +39,11 @@ function getIntervalMax(chartData: { time: number; load: number | null }[], char
 export function LoadWidget() {
   const chartData = useStore((store) => store.loadChartData);
   const hasLoadData = chartData.length > 0;
-  const chartPaused = useStore((store) => store.loadChartPaused);
   const chartWindowMs = useStore((store) => store.loadChartWindowMs);
   const latest = useStore((store) => store.loadLatestValue);
-  const setChartPaused = useStore((store) => store.setLoadChartPaused);
   const setChartWindowMs = useStore((store) => store.setLoadChartWindowMs);
   const [tarePending, setTarePending] = React.useState(false);
+  const [inspectionOpen, setInspectionOpen] = React.useState(false);
   const intervalMax = React.useMemo(
     () => getIntervalMax(chartData, chartWindowMs),
     [chartData, chartWindowMs],
@@ -70,9 +72,20 @@ export function LoadWidget() {
         <CardAction>
           <WidgetChartRangeControl
             ariaLabel="Load chart history range"
-            onPausedChange={setChartPaused}
+            inspectionButton={
+              <Button
+                aria-label="Inspect load graph"
+                className="border-r-border text-muted-foreground hover:bg-muted hover:text-foreground h-4 w-5 border-0 border-r [&_svg:not([class*='size-'])]:size-2.5"
+                onClick={() => setInspectionOpen(true)}
+                size="icon-xs"
+                title="Inspect load graph"
+                type="button"
+                variant="ghost"
+              >
+                <ChartPolarIcon />
+              </Button>
+            }
             onValueChange={setChartWindowMs}
-            paused={chartPaused}
             value={chartWindowMs}
           />
         </CardAction>
@@ -92,6 +105,7 @@ export function LoadWidget() {
         />
         {!hasLoadData ? <WidgetNoSignal className="flex-1" /> : <LoadWidgetChart />}
       </CardContent>
+      <GraphInspectionModal kind="load" open={inspectionOpen} onOpenChange={setInspectionOpen} />
     </WidgetCard>
   );
 }

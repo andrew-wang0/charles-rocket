@@ -1,9 +1,12 @@
 "use client";
 
+import { ChartPolarIcon } from "@phosphor-icons/react";
 import React from "react";
 
 import { client } from "@/client";
+import { Button } from "@/components/ui/button";
 import { CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GraphInspectionModal } from "@/components/widgets/graph-inspection-modal";
 import {
   chartConfig,
   PressureWidgetChart,
@@ -18,15 +21,14 @@ import { WidgetNoSignal } from "../widget-no-signal";
 
 export function PressureWidget() {
   const hasPressureData = useStore((store) => store.pressureChartData.length > 0);
-  const chartPaused = useStore((store) => store.pressureChartPaused);
   const chartWindowMs = useStore((store) => store.pressureChartWindowMs);
   const pt1 = useStore((store) => store.pressureLatestValues[0]);
   const pt2 = useStore((store) => store.pressureLatestValues[1]);
   const pt3 = useStore((store) => store.pressureLatestValues[2]);
-  const setChartPaused = useStore((store) => store.setPressureChartPaused);
   const setChartWindowMs = useStore((store) => store.setPressureChartWindowMs);
   const latestValues = [pt1, pt2, pt3];
   const [pendingIndex, setPendingIndex] = React.useState<number | null>(null);
+  const [inspectionOpen, setInspectionOpen] = React.useState(false);
 
   async function handleTare(index: number) {
     if (pendingIndex !== null || latestValues[index] === undefined) return;
@@ -52,9 +54,20 @@ export function PressureWidget() {
         <CardAction>
           <WidgetChartRangeControl
             ariaLabel="Pressure chart history range"
-            onPausedChange={setChartPaused}
+            inspectionButton={
+              <Button
+                aria-label="Inspect pressure graph"
+                className="border-r-border text-muted-foreground hover:bg-muted hover:text-foreground h-4 w-5 border-0 border-r [&_svg:not([class*='size-'])]:size-2.5"
+                onClick={() => setInspectionOpen(true)}
+                size="icon-xs"
+                title="Inspect pressure graph"
+                type="button"
+                variant="ghost"
+              >
+                <ChartPolarIcon />
+              </Button>
+            }
             onValueChange={setChartWindowMs}
-            paused={chartPaused}
             value={chartWindowMs}
           />
         </CardAction>
@@ -84,6 +97,11 @@ export function PressureWidget() {
           {!hasPressureData ? <WidgetNoSignal className="flex-1" /> : <PressureWidgetChart />}
         </div>
       </CardContent>
+      <GraphInspectionModal
+        kind="pressure"
+        open={inspectionOpen}
+        onOpenChange={setInspectionOpen}
+      />
     </WidgetCard>
   );
 }

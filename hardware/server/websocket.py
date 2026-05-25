@@ -151,7 +151,23 @@ def build_ignition_snapshot() -> dict[str, Any]:
     return get_ignition_controller().state_payload()
 
 
-def build_readings_result(include_history: bool = False) -> dict[str, Any]:
+def parse_optional_int_param(params: Any, key: str) -> int | None:
+    if not isinstance(params, dict) or params.get(key) is None:
+        return None
+
+    value = int(params[key])
+    if value < 0:
+        raise ValueError("Invalid params")
+
+    return value
+
+
+def build_readings_result(
+    include_history: bool = False,
+    start_time: int | None = None,
+    end_time: int | None = None,
+    max_points: int | None = None,
+) -> dict[str, Any]:
     servo = get_servo_controller()
 
     return {
@@ -171,7 +187,11 @@ def build_readings_result(include_history: bool = False) -> dict[str, Any]:
         "data": {
             "load": (
                 (
-                    load_sampler.history_payload()
+                    load_sampler.history_payload(
+                        start_time=start_time,
+                        end_time=end_time,
+                        max_points=max_points,
+                    )
                     if include_history
                     else load_sampler.latest_payload()
                 )
@@ -180,7 +200,11 @@ def build_readings_result(include_history: bool = False) -> dict[str, Any]:
             ),
             "pressure": (
                 (
-                    pressure_sampler.history_payload()
+                    pressure_sampler.history_payload(
+                        start_time=start_time,
+                        end_time=end_time,
+                        max_points=max_points,
+                    )
                     if include_history
                     else pressure_sampler.latest_payload()
                 )
@@ -617,7 +641,15 @@ async def dispatch_request(
 
     if method == "readings":
         include_history = isinstance(params, dict) and bool(params.get("history"))
-        return build_readings_result(include_history=include_history)
+        start_time = parse_optional_int_param(params, "startTime")
+        end_time = parse_optional_int_param(params, "endTime")
+        max_points = parse_optional_int_param(params, "maxPoints")
+        return build_readings_result(
+            include_history=include_history,
+            start_time=start_time,
+            end_time=end_time,
+            max_points=max_points,
+        )
 
     if method == "tare":
         return await handle_tare(websocket, params)

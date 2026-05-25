@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import importlib
 import logging
 import threading
 import time
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -26,6 +28,8 @@ THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 HX711_CLOCK_HIGH_TIMEOUT_SECONDS = 0.00006
 HX711_READ_MAX_TRIES = 12
 HX711_READ_ATTEMPT_MULTIPLIER = 4
+HISTORY_FILE_BUCKET_MS = 60 * 60 * 1000
+DEFAULT_HISTORY_MAX_POINTS = 1_200
 
 
 class LoadSampler:
@@ -43,6 +47,7 @@ class LoadSampler:
         self._buffer: deque[tuple[int, float]] = deque()
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "load-cell"
         self._data_file: TextIO | None = None
+        self._data_file_bucket: int | None = None
         self._reference_unit = calibration.reference_unit if calibration else LOAD_CELL_REFERENCE_UNIT
         self._zero = calibration.zero if calibration else LOAD_CELL_OFFSET
 
@@ -152,7 +157,6 @@ class LoadSampler:
             return
 
         self._data_dir.mkdir(parents=True, exist_ok=True)
-        self._data_file = self._open_data_file()
 
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="load-sampler", daemon=True)
@@ -172,6 +176,7 @@ class LoadSampler:
                 self._data_file.flush()
                 self._data_file.close()
             self._data_file = None
+            self._data_file_bucket = None
 
         if self._hx is not None and hasattr(self._hx, "power_down"):
             with contextlib.suppress(Exception):
@@ -188,12 +193,28 @@ class LoadSampler:
         with self._lock:
             return self._sensor_ok
 
-    def history_payload(self) -> list[dict[str, float | int]]:
+    def history_payload(
+        self,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        max_points: int | None = None,
+    ) -> list[dict[str, float | int]]:
+        should_query_files = start_time is not None or end_time is not None
+        limit = max_points or DEFAULT_HISTORY_MAX_POINTS
+        history = self._read_data_files(start_time, end_time) if should_query_files else []
+
         with self._lock:
-            return [
-                {"time": timestamp_ms, "value": pounds}
-                for timestamp_ms, pounds in self._buffer
-            ]
+            buffer_history = self._filter_history(list(self._buffer), start_time, end_time)
+            history = (
+                self._merge_history(history, buffer_history)
+                if should_query_files
+                else buffer_history
+            )
+
+        return [
+            {"time": timestamp_ms, "value": pounds}
+            for timestamp_ms, pounds in self._downsample_history(history, limit)
+        ]
 
     def latest_payload(self) -> list[dict[str, float | int]]:
         with self._lock:
@@ -231,8 +252,15 @@ class LoadSampler:
             )
             return tare_value
 
-    def _open_data_file(self) -> TextIO:
-        path = self._data_dir / "load-cell.csv"
+    def _data_file_bucket_value(self, timestamp_ms: int) -> int:
+        return timestamp_ms // HISTORY_FILE_BUCKET_MS
+
+    def _data_file_path(self, bucket: int) -> Path:
+        timestamp = datetime.fromtimestamp((bucket * HISTORY_FILE_BUCKET_MS) / 1000)
+        return self._data_dir / f"load-cell-{timestamp:%Y%m%d-%H}.csv"
+
+    def _open_data_file(self, bucket: int) -> TextIO:
+        path = self._data_file_path(bucket)
         is_new_file = not path.exists() or path.stat().st_size == 0
         handle = path.open("a", encoding="utf-8", buffering=1)
 
@@ -240,6 +268,122 @@ class LoadSampler:
             handle.write("timestamp_ms,pounds\n")
 
         return handle
+
+    def _get_data_file(self, timestamp_ms: int) -> TextIO:
+        bucket = self._data_file_bucket_value(timestamp_ms)
+
+        if self._data_file is not None and self._data_file_bucket == bucket:
+            return self._data_file
+
+        if self._data_file is not None:
+            with contextlib.suppress(Exception):
+                self._data_file.flush()
+                self._data_file.close()
+
+        self._data_file = self._open_data_file(bucket)
+        self._data_file_bucket = bucket
+        return self._data_file
+
+    def _history_file_paths(
+        self,
+        start_time: int | None,
+        end_time: int | None,
+    ) -> list[Path]:
+        if start_time is None or end_time is None:
+            return sorted(self._data_dir.glob("load-cell-*.csv"))
+
+        start_bucket = self._data_file_bucket_value(start_time)
+        end_bucket = self._data_file_bucket_value(end_time)
+        return [
+            path
+            for bucket in range(start_bucket, end_bucket + 1)
+            if (path := self._data_file_path(bucket)).exists()
+        ]
+
+    def _read_data_files(
+        self,
+        start_time: int | None,
+        end_time: int | None,
+    ) -> list[tuple[int, float]]:
+
+        readings: list[tuple[int, float]] = []
+
+        for path in self._history_file_paths(start_time, end_time):
+            try:
+                with path.open("r", encoding="utf-8", newline="") as handle:
+                    for row in csv.DictReader(handle):
+                        timestamp = row.get("timestamp_ms")
+                        pounds = row.get("pounds")
+
+                        if timestamp is None or pounds is None:
+                            continue
+
+                        timestamp_ms = int(timestamp)
+                        if not self._time_in_range(timestamp_ms, start_time, end_time):
+                            continue
+
+                        readings.append((timestamp_ms, float(pounds)))
+            except Exception as exc:
+                logger.warning("failed to read load history file: path=%s error=%s", path, exc)
+
+        return readings
+
+    def _time_in_range(
+        self,
+        timestamp_ms: int,
+        start_time: int | None,
+        end_time: int | None,
+    ) -> bool:
+        if start_time is not None and timestamp_ms < start_time:
+            return False
+
+        return not (end_time is not None and timestamp_ms > end_time)
+
+    def _filter_history(
+        self,
+        readings: list[tuple[int, float]],
+        start_time: int | None,
+        end_time: int | None,
+    ) -> list[tuple[int, float]]:
+        return [
+            (timestamp_ms, pounds)
+            for timestamp_ms, pounds in readings
+            if self._time_in_range(timestamp_ms, start_time, end_time)
+        ]
+
+    def _merge_history(
+        self,
+        persisted: list[tuple[int, float]],
+        buffered: list[tuple[int, float]],
+    ) -> list[tuple[int, float]]:
+        if not persisted:
+            return buffered
+
+        if not buffered:
+            return persisted
+
+        seen = {timestamp_ms for timestamp_ms, _pounds in persisted}
+        merged = persisted + [
+            (timestamp_ms, pounds)
+            for timestamp_ms, pounds in buffered
+            if timestamp_ms not in seen
+        ]
+        return sorted(merged, key=lambda reading: reading[0])
+
+    def _downsample_history(
+        self,
+        readings: list[tuple[int, float]],
+        max_points: int,
+    ) -> list[tuple[int, float]]:
+        limit = max(2, max_points)
+
+        if len(readings) <= limit:
+            return readings
+
+        return [
+            readings[round(index * (len(readings) - 1) / (limit - 1))]
+            for index in range(limit)
+        ]
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -325,5 +469,4 @@ class LoadSampler:
             while (self._buffer[0][0] if self._buffer else timestamp_ms) < cutoff:
                 self._buffer.popleft()
 
-        if self._data_file is not None:
-            self._data_file.write(f"{timestamp_ms},{pounds:.6f}\n")
+        self._get_data_file(timestamp_ms).write(f"{timestamp_ms},{pounds:.6f}\n")

@@ -149,9 +149,13 @@ function ChartTooltipContent({
       !labelKey && typeof label === "string" ? (config[label].label ?? label) : itemConfig?.label;
 
     if (labelFormatter) {
-      return (
-        <div className={cn("font-medium", labelClassName)}>{labelFormatter(value, payload)}</div>
-      );
+      const formattedLabel = labelFormatter(value, payload);
+
+      if (formattedLabel === null || formattedLabel === undefined) {
+        return null;
+      }
+
+      return <div className={cn("font-medium", labelClassName)}>{formattedLabel}</div>;
     }
 
     if (!value) {

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import importlib
 import logging
 import sys
 import threading
 import time
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence, TextIO
 
@@ -33,6 +35,8 @@ THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 PRESSURE_READ_MAX_ATTEMPTS = 3
 PRESSURE_READ_RETRY_DELAY_SECONDS = 0.002
 PRESSURE_FAILURE_LOG_INTERVAL = 60
+HISTORY_FILE_BUCKET_MS = 60 * 60 * 1000
+DEFAULT_HISTORY_MAX_POINTS = 1_200
 
 
 class PressureSampler:
@@ -60,7 +64,8 @@ class PressureSampler:
             for index in range(PRESSURE_TRANSDUCER_COUNT)
         ]
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "pressure-transducers"
-        self._file_handles: list[TextIO] = []
+        self._file_handles: list[TextIO | None] = [None] * PRESSURE_TRANSDUCER_COUNT
+        self._file_handle_buckets: list[int | None] = [None] * PRESSURE_TRANSDUCER_COUNT
 
         try:
             self._add_raspberry_pi_system_packages()
@@ -109,7 +114,6 @@ class PressureSampler:
             return
 
         self._data_dir.mkdir(parents=True, exist_ok=True)
-        self._file_handles = [self._open_data_file(index) for index in range(PRESSURE_TRANSDUCER_COUNT)]
 
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, name="pressure-sampler", daemon=True)
@@ -129,7 +133,8 @@ class PressureSampler:
                 handle.flush()
                 handle.close()
 
-        self._file_handles = []
+        self._file_handles = [None] * PRESSURE_TRANSDUCER_COUNT
+        self._file_handle_buckets = [None] * PRESSURE_TRANSDUCER_COUNT
 
         if self._i2c is not None:
             with contextlib.suppress(Exception):
@@ -141,12 +146,35 @@ class PressureSampler:
         with self._lock:
             return list(self._sensor_ok)
 
-    def history_payload(self) -> list[list[dict[str, float | int]]]:
+    def history_payload(
+        self,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        max_points: int | None = None,
+    ) -> list[list[dict[str, float | int]]]:
+        should_query_files = start_time is not None or end_time is not None
+        limit = max_points or DEFAULT_HISTORY_MAX_POINTS
+        history = [
+            self._read_data_files(index, start_time, end_time) if should_query_files else []
+            for index in range(PRESSURE_TRANSDUCER_COUNT)
+        ]
+
         with self._lock:
-            return [
-                [{"time": timestamp_ms, "value": psi} for timestamp_ms, psi in buffer]
-                for buffer in self._transport_buffers
+            for index, buffer in enumerate(self._transport_buffers):
+                buffer_history = self._filter_history(list(buffer), start_time, end_time)
+                history[index] = (
+                    self._merge_history(history[index], buffer_history)
+                    if should_query_files
+                    else buffer_history
+                )
+
+        return [
+            [
+                {"time": timestamp_ms, "value": psi}
+                for timestamp_ms, psi in self._downsample_history(readings, limit)
             ]
+            for readings in history
+        ]
 
     def latest_payload(self) -> list[list[dict[str, float | int]]]:
         with self._lock:
@@ -197,8 +225,15 @@ class PressureSampler:
             )
             return tare_value
 
-    def _open_data_file(self, index: int) -> TextIO:
-        path = self._data_dir / f"pt-{index + 1}.csv"
+    def _data_file_bucket(self, timestamp_ms: int) -> int:
+        return timestamp_ms // HISTORY_FILE_BUCKET_MS
+
+    def _data_file_path(self, index: int, bucket: int) -> Path:
+        timestamp = datetime.fromtimestamp((bucket * HISTORY_FILE_BUCKET_MS) / 1000)
+        return self._data_dir / f"pt-{index + 1}-{timestamp:%Y%m%d-%H}.csv"
+
+    def _open_data_file(self, index: int, bucket: int) -> TextIO:
+        path = self._data_file_path(index, bucket)
         is_new_file = not path.exists() or path.stat().st_size == 0
         handle = path.open("a", encoding="utf-8", buffering=1)
 
@@ -206,6 +241,124 @@ class PressureSampler:
             handle.write("timestamp_ms,psi,voltage\n")
 
         return handle
+
+    def _get_data_file(self, index: int, timestamp_ms: int) -> TextIO:
+        bucket = self._data_file_bucket(timestamp_ms)
+
+        if self._file_handles[index] is not None and self._file_handle_buckets[index] == bucket:
+            return self._file_handles[index]
+
+        if self._file_handles[index] is not None:
+            with contextlib.suppress(Exception):
+                self._file_handles[index].flush()
+                self._file_handles[index].close()
+
+        handle = self._open_data_file(index, bucket)
+        self._file_handles[index] = handle
+        self._file_handle_buckets[index] = bucket
+        return handle
+
+    def _history_file_paths(
+        self,
+        index: int,
+        start_time: int | None,
+        end_time: int | None,
+    ) -> list[Path]:
+        if start_time is None or end_time is None:
+            return sorted(self._data_dir.glob(f"pt-{index + 1}-*.csv"))
+
+        start_bucket = self._data_file_bucket(start_time)
+        end_bucket = self._data_file_bucket(end_time)
+        return [
+            path
+            for bucket in range(start_bucket, end_bucket + 1)
+            if (path := self._data_file_path(index, bucket)).exists()
+        ]
+
+    def _read_data_files(
+        self,
+        index: int,
+        start_time: int | None,
+        end_time: int | None,
+    ) -> list[tuple[int, float]]:
+        readings: list[tuple[int, float]] = []
+
+        for path in self._history_file_paths(index, start_time, end_time):
+            try:
+                with path.open("r", encoding="utf-8", newline="") as handle:
+                    for row in csv.DictReader(handle):
+                        timestamp = row.get("timestamp_ms")
+                        psi = row.get("psi")
+
+                        if timestamp is None or psi is None:
+                            continue
+
+                        timestamp_ms = int(timestamp)
+                        if not self._time_in_range(timestamp_ms, start_time, end_time):
+                            continue
+
+                        readings.append((timestamp_ms, float(psi)))
+            except Exception as exc:
+                logger.warning("failed to read pressure history file: path=%s error=%s", path, exc)
+
+        return readings
+
+    def _time_in_range(
+        self,
+        timestamp_ms: int,
+        start_time: int | None,
+        end_time: int | None,
+    ) -> bool:
+        if start_time is not None and timestamp_ms < start_time:
+            return False
+
+        return not (end_time is not None and timestamp_ms > end_time)
+
+    def _filter_history(
+        self,
+        readings: list[tuple[int, float]],
+        start_time: int | None,
+        end_time: int | None,
+    ) -> list[tuple[int, float]]:
+        return [
+            (timestamp_ms, psi)
+            for timestamp_ms, psi in readings
+            if self._time_in_range(timestamp_ms, start_time, end_time)
+        ]
+
+    def _merge_history(
+        self,
+        persisted: list[tuple[int, float]],
+        buffered: list[tuple[int, float]],
+    ) -> list[tuple[int, float]]:
+        if not persisted:
+            return buffered
+
+        if not buffered:
+            return persisted
+
+        seen = {timestamp_ms for timestamp_ms, _psi in persisted}
+        merged = persisted + [
+            (timestamp_ms, psi)
+            for timestamp_ms, psi in buffered
+            if timestamp_ms not in seen
+        ]
+        return sorted(merged, key=lambda reading: reading[0])
+
+    def _downsample_history(
+        self,
+        readings: list[tuple[int, float]],
+        max_points: int,
+    ) -> list[tuple[int, float]]:
+        limit = max(2, max_points)
+
+        if len(readings) <= limit:
+            return readings
+
+        return [
+            readings[round(index * (len(readings) - 1) / (limit - 1))]
+            for index in range(limit)
+        ]
 
     def _run(self) -> None:
         channel_index = 0
@@ -266,7 +419,9 @@ class PressureSampler:
                 previous_failures,
             )
 
-        self._file_handles[channel_index].write(f"{timestamp_ms},{psi:.6f},{voltage:.6f}\n")
+        self._get_data_file(channel_index, timestamp_ms).write(
+            f"{timestamp_ms},{psi:.6f},{voltage:.6f}\n"
+        )
 
     def _record_read_failure(self, channel_index: int, exc: Exception) -> None:
         with self._lock:
