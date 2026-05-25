@@ -14,6 +14,7 @@ type Props = {
   onTare?: () => void;
   tareDisabled?: boolean;
   maxResetKey?: number;
+  maxValue?: number;
   trackMax?: boolean;
 } & React.ComponentProps<typeof Card>;
 
@@ -26,10 +27,12 @@ export function WidgetChartValueCard({
   onTare,
   tareDisabled,
   maxResetKey,
+  maxValue,
   trackMax,
   ...props
 }: Props) {
   const [max, setMax] = React.useState(value);
+  const displayedMax = maxValue ?? max;
 
   React.useEffect(() => {
     if (!trackMax) return;
@@ -56,7 +59,7 @@ export function WidgetChartValueCard({
           <div className="text-muted-foreground text-xs">{label}</div>
           <div className="flex items-end space-x-6">
             <div className="mt-1 font-mono text-lg tabular-nums">{display(value)}</div>
-            {trackMax && <div className="text-muted-foreground">MAX: {display(max)}</div>}
+            {trackMax && <div className="text-muted-foreground">MAX: {display(displayedMax)}</div>}
           </div>
         </div>
         {onTare && (

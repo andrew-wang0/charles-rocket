@@ -13,15 +13,39 @@ import { formatChartValue } from "@/lib/util/chart";
 
 import { WidgetNoSignal } from "../widget-no-signal";
 
+function getIntervalMax(chartData: { time: number; load: number | null }[], chartWindowMs: number) {
+  const latestTime = chartData.at(-1)?.time;
+
+  if (latestTime === undefined) return undefined;
+
+  const windowStart = Math.max(0, latestTime - chartWindowMs);
+  let max: number | undefined;
+
+  for (let index = chartData.length - 1; index >= 0; index -= 1) {
+    const point = chartData[index];
+
+    if (point.time < windowStart) break;
+    if (point.load === null) continue;
+
+    max = max === undefined ? point.load : Math.max(max, point.load);
+  }
+
+  return max;
+}
+
 export function LoadWidget() {
-  const hasLoadData = useStore((store) => store.loadChartData.length > 0);
+  const chartData = useStore((store) => store.loadChartData);
+  const hasLoadData = chartData.length > 0;
   const chartPaused = useStore((store) => store.loadChartPaused);
   const chartWindowMs = useStore((store) => store.loadChartWindowMs);
   const latest = useStore((store) => store.loadLatestValue);
   const setChartPaused = useStore((store) => store.setLoadChartPaused);
   const setChartWindowMs = useStore((store) => store.setLoadChartWindowMs);
-  const [maxResetKey, setMaxResetKey] = React.useState(0);
   const [tarePending, setTarePending] = React.useState(false);
+  const intervalMax = React.useMemo(
+    () => getIntervalMax(chartData, chartWindowMs),
+    [chartData, chartWindowMs],
+  );
 
   async function handleTare() {
     if (tarePending || latest === undefined) return;
@@ -32,7 +56,6 @@ export function LoadWidget() {
       await client.tare({
         device: "load",
       });
-      setMaxResetKey((key) => key + 1);
     } catch (error) {
       console.error("Failed to tare load cell", error);
     } finally {
@@ -64,7 +87,7 @@ export function LoadWidget() {
             void handleTare();
           }}
           tareDisabled={latest === undefined || tarePending}
-          maxResetKey={maxResetKey}
+          maxValue={intervalMax}
           trackMax
         />
         {!hasLoadData ? <WidgetNoSignal className="flex-1" /> : <LoadWidgetChart />}
