@@ -55,6 +55,8 @@ type SeriesConfig = {
 
 const DEFAULT_INSPECTION_WINDOW_MS = 60_000;
 const INSPECTION_MAX_POINTS_PER_LINE = 1_200;
+const DATETIME_LOCAL_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 
 const PRESSURE_SERIES = [
   { key: "pt1", label: "PT 1", color: pressureChartConfig.pt1.color },
@@ -162,12 +164,39 @@ function toDatetimeLocalValue(time: number) {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   const seconds = String(date.getSeconds()).padStart(2, "0");
+  const milliseconds = String(date.getMilliseconds()).padStart(3, "0");
 
-  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}`;
 }
 
 function fromDatetimeLocalValue(value: string) {
-  const time = new Date(value).getTime();
+  const match = DATETIME_LOCAL_PATTERN.exec(value);
+
+  if (!match) return undefined;
+
+  const [, year, month, day, hours, minutes, seconds = "0", milliseconds = "0"] = match;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hours),
+    Number(minutes),
+    Number(seconds),
+    Number(milliseconds.padEnd(3, "0")),
+  );
+  const time = date.getTime();
+
+  if (
+    date.getFullYear() !== Number(year) ||
+    date.getMonth() !== Number(month) - 1 ||
+    date.getDate() !== Number(day) ||
+    date.getHours() !== Number(hours) ||
+    date.getMinutes() !== Number(minutes) ||
+    date.getSeconds() !== Number(seconds)
+  ) {
+    return undefined;
+  }
+
   return Number.isFinite(time) ? time : undefined;
 }
 
@@ -342,7 +371,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
               <input
                 className="border-input bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-8 min-w-0 border px-2 text-xs normal-case tabular-nums outline-none focus-visible:ring-1"
                 onChange={(event) => setStartInput(event.target.value)}
-                step={1}
+                step={0.001}
                 type="datetime-local"
                 value={startInput}
               />
@@ -352,7 +381,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
               <input
                 className="border-input bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-8 min-w-0 border px-2 text-xs normal-case tabular-nums outline-none focus-visible:ring-1"
                 onChange={(event) => setEndInput(event.target.value)}
-                step={1}
+                step={0.001}
                 type="datetime-local"
                 value={endInput}
               />

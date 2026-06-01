@@ -19,6 +19,7 @@ from config import (
     LOAD_CELL_REFERENCE_UNIT,
     LOAD_CELL_SAMPLES_PER_READING,
     LOAD_CELL_WINDOW_SECONDS,
+    SENSOR_RECORD_WINDOW_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class LoadSampler:
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "load-cell"
         self._data_file: TextIO | None = None
         self._data_file_bucket: int | None = None
+        self._last_pruned_bucket: int | None = None
         self._reference_unit = calibration.reference_unit if calibration else LOAD_CELL_REFERENCE_UNIT
         self._zero = calibration.zero if calibration else LOAD_CELL_OFFSET
 
@@ -265,6 +267,42 @@ class LoadSampler:
         timestamp = datetime.fromtimestamp((bucket * HISTORY_FILE_BUCKET_MS) / 1000)
         return self._data_dir / f"load-cell-{timestamp:%Y%m%d-%H}.csv"
 
+    def _parse_data_file_bucket_start(self, path: Path) -> int | None:
+        name = path.stem
+        prefix = "load-cell-"
+
+        if not name.startswith(prefix):
+            return None
+
+        try:
+            timestamp = datetime.strptime(name[len(prefix):], "%Y%m%d-%H")
+        except ValueError:
+            return None
+
+        return int(timestamp.timestamp() * 1000)
+
+    def _delete_expired_data_files(self, timestamp_ms: int) -> None:
+        bucket = self._data_file_bucket_value(timestamp_ms)
+        if self._last_pruned_bucket == bucket:
+            return
+
+        self._last_pruned_bucket = bucket
+        cutoff_ms = timestamp_ms - SENSOR_RECORD_WINDOW_SECONDS * 1000
+
+        for path in self._data_dir.glob("load-cell-*.csv"):
+            bucket_start_ms = self._parse_data_file_bucket_start(path)
+            if bucket_start_ms is None:
+                continue
+
+            if bucket_start_ms + HISTORY_FILE_BUCKET_MS > cutoff_ms:
+                continue
+
+            try:
+                path.unlink()
+                logger.info("deleted expired load history file: path=%s", path)
+            except Exception:
+                logger.exception("failed to delete expired load history file: path=%s", path)
+
     def _open_data_file(self, bucket: int) -> TextIO:
         path = self._data_file_path(bucket)
         is_new_file = not path.exists() or path.stat().st_size == 0
@@ -286,6 +324,7 @@ class LoadSampler:
                 self._data_file.flush()
                 self._data_file.close()
 
+        self._delete_expired_data_files(timestamp_ms)
         self._data_file = self._open_data_file(bucket)
         self._data_file_bucket = bucket
         return self._data_file

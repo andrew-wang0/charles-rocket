@@ -33,7 +33,7 @@ function ServoStatusCircle({ index }: { index: number }) {
   return (
     <div
       className={cn(
-        "flex size-16 items-center justify-center rounded-full border text-[0.65rem] font-medium capitalize",
+        "flex size-16 cursor-not-allowed items-center justify-center rounded-full border text-[0.65rem] font-medium capitalize",
         getStatusClassName(servo.state),
       )}
     >
