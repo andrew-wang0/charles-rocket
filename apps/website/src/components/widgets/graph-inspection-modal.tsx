@@ -53,8 +53,12 @@ type SeriesConfig = {
   color: string;
 };
 
+type HistoryRequest = {
+  range?: readonly [number, number];
+  windowMs?: number;
+};
+
 const DEFAULT_INSPECTION_WINDOW_MS = 60_000;
-const INSPECTION_MAX_POINTS_PER_LINE = 1_200;
 const DATETIME_LOCAL_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 
@@ -93,47 +97,6 @@ function getVisibleData<TPoint extends { time: number }>(
   domain: readonly [number, number],
 ) {
   return data.filter((point) => point.time >= domain[0] && point.time <= domain[1]);
-}
-
-function downsampleReadings<T>(readings: T[], maxPoints: number) {
-  if (readings.length <= maxPoints) return readings;
-
-  return Array.from({ length: maxPoints }, (_, index) => {
-    return readings[roundToNearestIndex(index, readings.length, maxPoints)];
-  });
-}
-
-function roundToNearestIndex(index: number, totalPoints: number, maxPoints: number) {
-  return Math.round((index * (totalPoints - 1)) / (maxPoints - 1));
-}
-
-function downsampleChartData(
-  data: InspectionPoint[],
-  series: SeriesConfig[],
-  maxPointsPerLine: number,
-) {
-  if (series.length === 0) return [];
-
-  const pointsByTime = new Map<number, InspectionPoint>();
-
-  for (const entry of series) {
-    const readings = data
-      .map((point) => ({
-        time: point.time,
-        value: point[entry.key],
-      }))
-      .filter((point): point is { time: number; value: number } => {
-        return typeof point.value === "number";
-      });
-
-    for (const reading of downsampleReadings(readings, maxPointsPerLine)) {
-      const point = pointsByTime.get(reading.time) ?? { time: reading.time };
-      point[entry.key] = reading.value;
-      pointsByTime.set(reading.time, point);
-    }
-  }
-
-  return Array.from(pointsByTime.values()).sort((left, right) => left.time - right.time);
 }
 
 function getInspectionCopy(kind: GraphKind) {
@@ -200,6 +163,24 @@ function fromDatetimeLocalValue(value: string) {
   return Number.isFinite(time) ? time : undefined;
 }
 
+function getResolvedRange(
+  data: InspectionPoint[],
+  request: HistoryRequest,
+  responseRange?: { startTime: number; endTime: number },
+) {
+  if (responseRange) {
+    return [responseRange.startTime, responseRange.endTime] as const;
+  }
+
+  if (request.range) {
+    return request.range;
+  }
+
+  const end = data.at(-1)?.time ?? Date.now();
+  const windowMs = request.windowMs ?? DEFAULT_INSPECTION_WINDOW_MS;
+  return [Math.max(0, end - windowMs), end] as const;
+}
+
 export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   const copy = getInspectionCopy(kind);
   const [pressureData, setPressureData] = React.useState<PressureChartPoint[]>([]);
@@ -225,10 +206,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   const fullDomain = React.useMemo(() => getDomain(data, queryDomain), [data, queryDomain]);
   const activeDomain = domain ?? fullDomain;
   const visibleData = React.useMemo(() => getVisibleData(data, activeDomain), [activeDomain, data]);
-  const renderData = React.useMemo(
-    () => downsampleChartData(visibleData, visibleSeries, INSPECTION_MAX_POINTS_PER_LINE),
-    [visibleData, visibleSeries],
-  );
+  const renderData = visibleData;
   const referenceValues = React.useMemo(
     () => getReferenceValues(visibleData, visibleSeries),
     [visibleData, visibleSeries],
@@ -239,35 +217,54 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   );
   const hasZoom = domain !== null;
 
-  const loadHistory = React.useCallback(async (range: readonly [number, number]) => {
-    setLoading(true);
-    setError(null);
+  const loadHistory = React.useCallback(
+    async (request: HistoryRequest) => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      const result = await client.readings({
-        history: true,
-        startTime: range[0],
-        endTime: range[1],
-      });
+      try {
+        const result = await client.readings({
+          history: true,
+          includeLoad: kind === "load",
+          includePressure: kind === "pressure",
+          ...(request.range
+            ? {
+                startTime: request.range[0],
+                endTime: request.range[1],
+              }
+            : {
+                windowMs: request.windowMs ?? DEFAULT_INSPECTION_WINDOW_MS,
+              }),
+        });
+        const nextPressureData =
+          kind === "pressure" ? buildRawPressureChartData(result.data.pressure) : [];
+        const nextLoadData = kind === "load" ? buildRawLoadChartData(result.data.load) : [];
+        const nextData = (kind === "pressure" ? nextPressureData : nextLoadData) as
+          | PressureChartPoint[]
+          | LoadChartPoint[];
+        const nextRange = getResolvedRange(
+          nextData as InspectionPoint[],
+          request,
+          result.timeRange,
+        );
 
-      setPressureData(buildRawPressureChartData(result.data.pressure));
-      setLoadData(buildRawLoadChartData(result.data.load));
-      setQueryDomain(range);
-      setDomain(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to load graph history");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+        setPressureData(nextPressureData);
+        setLoadData(nextLoadData);
+        setQueryDomain(nextRange);
+        setStartInput(toDatetimeLocalValue(nextRange[0]));
+        setEndInput(toDatetimeLocalValue(nextRange[1]));
+        setDomain(null);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Unable to load graph history");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [kind],
+  );
 
   const loadDefaultHistory = React.useCallback(() => {
-    const end = Date.now();
-    const range = [end - DEFAULT_INSPECTION_WINDOW_MS, end] as const;
-
-    setStartInput(toDatetimeLocalValue(range[0]));
-    setEndInput(toDatetimeLocalValue(range[1]));
-    void loadHistory(range);
+    void loadHistory({ windowMs: DEFAULT_INSPECTION_WINDOW_MS });
   }, [loadHistory]);
 
   React.useEffect(() => {
@@ -328,7 +325,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
       return;
     }
 
-    void loadHistory([start, end]);
+    void loadHistory({ range: [start, end] });
   }
 
   function toggleSeries(key: string) {

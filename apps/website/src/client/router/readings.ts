@@ -9,11 +9,21 @@ export const readings = method({
     .object({
       endTime: z.number().int().nonnegative().optional(),
       history: z.boolean().optional(),
+      includeLoad: z.boolean().optional(),
+      includePressure: z.boolean().optional(),
       maxPoints: z.number().int().min(100).max(5_000).optional(),
       startTime: z.number().int().nonnegative().optional(),
+      windowMs: z.number().int().positive().optional(),
     })
     .optional(),
   resultSchema: z.object({
+    serverTime: z.number().int().nonnegative().optional(),
+    timeRange: z
+      .object({
+        endTime: z.number().int().nonnegative(),
+        startTime: z.number().int().nonnegative(),
+      })
+      .optional(),
     status: z.object({
       servoControllerOk: z.boolean(),
       pressureSensorsOk: z.array(z.boolean()).length(PRESSURE_TRANSDUCER_COUNT),

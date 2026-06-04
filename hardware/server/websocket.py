@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import time
 from typing import Any, cast
 
 import websockets
@@ -162,15 +163,41 @@ def parse_optional_int_param(params: Any, key: str) -> int | None:
     return value
 
 
+def parse_optional_bool_param(params: Any, key: str, default: bool) -> bool:
+    if not isinstance(params, dict) or params.get(key) is None:
+        return default
+
+    value = params[key]
+    if not isinstance(value, bool):
+        raise ValueError("Invalid params")
+
+    return value
+
+
 def build_readings_result(
     include_history: bool = False,
+    include_load: bool = True,
+    include_pressure: bool = True,
     start_time: int | None = None,
     end_time: int | None = None,
     max_points: int | None = None,
+    window_ms: int | None = None,
 ) -> dict[str, Any]:
     servo = get_servo_controller()
+    server_time = int(time.time() * 1000)
 
-    return {
+    if include_history and window_ms is not None:
+        if end_time is None:
+            end_time = server_time
+
+        if start_time is None:
+            start_time = max(0, end_time - window_ms)
+
+    if start_time is not None and end_time is not None and start_time > end_time:
+        raise ValueError("Invalid params")
+
+    result = {
+        "serverTime": server_time,
         "status": {
             "servoControllerOk": servo.available,
             "pressureSensorsOk": (
@@ -195,7 +222,7 @@ def build_readings_result(
                     if include_history
                     else load_sampler.latest_payload()
                 )
-                if load_sampler is not None
+                if include_load and load_sampler is not None
                 else []
             ),
             "pressure": (
@@ -208,11 +235,19 @@ def build_readings_result(
                     if include_history
                     else pressure_sampler.latest_payload()
                 )
-                if pressure_sampler is not None
+                if include_pressure and pressure_sampler is not None
                 else build_empty_pressure_payload()
             ),
         },
     }
+
+    if include_history and start_time is not None and end_time is not None:
+        result["timeRange"] = {
+            "startTime": start_time,
+            "endTime": end_time,
+        }
+
+    return result
 
 
 def parse_servo_target(value: Any) -> ServoStableState:
@@ -641,14 +676,24 @@ async def dispatch_request(
 
     if method == "readings":
         include_history = isinstance(params, dict) and bool(params.get("history"))
+        include_load = parse_optional_bool_param(params, "includeLoad", True)
+        include_pressure = parse_optional_bool_param(params, "includePressure", True)
         start_time = parse_optional_int_param(params, "startTime")
         end_time = parse_optional_int_param(params, "endTime")
         max_points = parse_optional_int_param(params, "maxPoints")
+        window_ms = parse_optional_int_param(params, "windowMs")
+
+        if window_ms is not None and window_ms <= 0:
+            raise ValueError("Invalid params")
+
         return build_readings_result(
             include_history=include_history,
+            include_load=include_load,
+            include_pressure=include_pressure,
             start_time=start_time,
             end_time=end_time,
             max_points=max_points,
+            window_ms=window_ms,
         )
 
     if method == "tare":

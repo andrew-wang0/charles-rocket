@@ -162,16 +162,47 @@ function ignitionSnapshot() {
 function handleReadings(params: unknown) {
   const payload = params === undefined ? {} : asRecord(params);
   const includeHistory = payload.history === true;
+  const includeLoad = payload.includeLoad !== false;
+  const includePressure = payload.includePressure !== false;
+  const serverTime = Date.now();
+  let startTime = getOptionalNumber(payload.startTime);
+  let endTime = getOptionalNumber(payload.endTime);
+  const windowMs = getOptionalNumber(payload.windowMs);
+
+  if (includeHistory && windowMs !== undefined) {
+    endTime ??= serverTime;
+    startTime ??= Math.max(0, endTime - windowMs);
+  }
+
+  const loadData = includeLoad
+    ? includeHistory
+      ? loadHistory(startTime, endTime)
+      : latestLoadPayload()
+    : [];
+  const pressureData = includePressure
+    ? includeHistory
+      ? pressureHistory(startTime, endTime)
+      : latestPressurePayload()
+    : emptyPressurePayload();
 
   return {
+    serverTime,
+    ...(includeHistory && startTime !== undefined && endTime !== undefined
+      ? {
+          timeRange: {
+            startTime,
+            endTime,
+          },
+        }
+      : {}),
     status: {
       servoControllerOk: true,
       pressureSensorsOk: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => true),
       loadSensorOk: true,
     },
     data: {
-      load: includeHistory ? loadHistory() : latestLoadPayload(),
-      pressure: includeHistory ? pressureHistory() : latestPressurePayload(),
+      load: loadData,
+      pressure: pressureData,
     },
   };
 }
@@ -220,8 +251,12 @@ function latestPressurePayload() {
   });
 }
 
-function pressureHistory() {
-  return pressureBuffers.map((buffer) => [...buffer]);
+function emptyPressurePayload() {
+  return Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => []);
+}
+
+function pressureHistory(startTime?: number, endTime?: number) {
+  return pressureBuffers.map((buffer) => filterHistory(buffer, startTime, endTime));
 }
 
 function latestLoadPayload() {
@@ -229,8 +264,15 @@ function latestLoadPayload() {
   return latest ? [latest] : [];
 }
 
-function loadHistory() {
-  return [...loadBuffer];
+function loadHistory(startTime?: number, endTime?: number) {
+  return filterHistory(loadBuffer, startTime, endTime);
+}
+
+function filterHistory(buffer: TimedReading[], startTime?: number, endTime?: number) {
+  return buffer.filter((reading) => {
+    if (startTime !== undefined && reading.time < startTime) return false;
+    return !(endTime !== undefined && reading.time > endTime);
+  });
 }
 
 function appendPressureSample(now: number) {
@@ -330,6 +372,12 @@ function asRecord(value: unknown) {
   }
 
   return value as Record<string, unknown>;
+}
+
+function getOptionalNumber(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
 }
 
 function okResponse(id: JsonRpcId, result: unknown) {

@@ -18,6 +18,12 @@ from config import (
 
 logger = logging.getLogger(__name__)
 AUDIO_SHUTDOWN_TIMEOUT_SECONDS = 1.0
+AUDIO_DEVICE_BUSY_RETRY_COUNT = 8
+AUDIO_DEVICE_BUSY_RETRY_SECONDS = 0.25
+
+
+class AudioDeviceBusyError(RuntimeError):
+    pass
 
 
 class WavAudioRecorder:
@@ -56,12 +62,33 @@ class WavAudioRecorder:
             except FileNotFoundError:
                 logger.error("audio recording unavailable: `arecord` command not found")
                 await asyncio.sleep(5)
+            except AudioDeviceBusyError as exc:
+                logger.warning("audio recording skipped because device stayed busy: %s", exc)
+                await asyncio.sleep(1)
             except Exception:
                 logger.exception("audio recording chunk failed")
                 await asyncio.sleep(1)
 
     async def _record_chunk(self, path: Path) -> None:
-        logger.info("audio recording chunk opened: path=%s device=%s", path, AUDIO_RECORD_DEVICE)
+        for attempt in range(1, AUDIO_DEVICE_BUSY_RETRY_COUNT + 2):
+            try:
+                await self._record_chunk_once(path)
+                return
+            except AudioDeviceBusyError:
+                if attempt > AUDIO_DEVICE_BUSY_RETRY_COUNT:
+                    raise
+
+                logger.warning(
+                    "audio device busy; retrying chunk open: attempt=%s/%s delay=%ss device=%s",
+                    attempt,
+                    AUDIO_DEVICE_BUSY_RETRY_COUNT,
+                    AUDIO_DEVICE_BUSY_RETRY_SECONDS,
+                    AUDIO_RECORD_DEVICE,
+                )
+                await asyncio.sleep(AUDIO_DEVICE_BUSY_RETRY_SECONDS)
+
+    async def _record_chunk_once(self, path: Path) -> None:
+        logger.info("audio recording chunk opening: path=%s device=%s", path, AUDIO_RECORD_DEVICE)
         process = await asyncio.create_subprocess_exec(
             "arecord",
             "-D",
@@ -93,7 +120,14 @@ class WavAudioRecorder:
             message = (stderr or b"").decode("utf-8", errors="replace").strip()
             with contextlib.suppress(FileNotFoundError):
                 path.unlink()
+
+            if self._is_device_busy_message(message):
+                raise AudioDeviceBusyError(message)
+
             raise RuntimeError(f"arecord exited with code {process.returncode}: {message}")
+
+    def _is_device_busy_message(self, message: str) -> bool:
+        return "Device or resource busy" in message
 
     async def _stop_process(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:
