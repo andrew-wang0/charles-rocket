@@ -83,7 +83,7 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
             last_send_time = loop.time()
     except asyncio.CancelledError:
         raise
-    except (ConnectionResetError, BrokenPipeError):
+    except (ConnectionError, ConnectionResetError, BrokenPipeError):
         pass
     except Exception:
         logger.exception("video stream failed")
