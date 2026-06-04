@@ -5,5 +5,4 @@ adafruit-circuitpython-motor
 adafruit-circuitpython-pca9685
 rpi-lgpio
 hx711
-opencv-python-headless
 websockets

@@ -4,7 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VIDEO_DIR="${VIDEO_DIR:-"$SCRIPT_DIR/video"}"
 AUDIO_DIR="${AUDIO_DIR:-"$SCRIPT_DIR/audio"}"
-VIDEO_FPS="${VIDEO_FPS:-30}"
+H264_CHUNK_SECONDS="${H264_CHUNK_SECONDS:-1}"
+VIDEO_PROBE_DURATIONS="${VIDEO_PROBE_DURATIONS:-0}"
+LOOKBACK_SECONDS="${LOOKBACK_SECONDS:-3600}"
+VIDEO_ENCODER="${VIDEO_ENCODER:-libx264}"
+VIDEO_PRESET="${VIDEO_PRESET:-ultrafast}"
+VIDEO_CRF="${VIDEO_CRF:-23}"
+AUDIO_ENCODER="${AUDIO_ENCODER:-aac}"
+AUDIO_BITRATE="${AUDIO_BITRATE:-128k}"
 OUTPUT_TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_PATH="${OUTPUT_PATH:-"$SCRIPT_DIR/output_${OUTPUT_TIMESTAMP}.mp4"}"
 WORK_DIR="$(mktemp -d)"
@@ -31,27 +38,49 @@ require_command ffmpeg
 require_command ffprobe
 require_command python3
 
-python3 - "$VIDEO_DIR" "$AUDIO_DIR" "$VIDEO_FPS" "$WORK_DIR" "$PLAN_PATH" <<'PY'
+python3 - \
+  "$VIDEO_DIR" \
+  "$AUDIO_DIR" \
+  "$H264_CHUNK_SECONDS" \
+  "$VIDEO_PROBE_DURATIONS" \
+  "$LOOKBACK_SECONDS" \
+  "$WORK_DIR" \
+  "$PLAN_PATH" <<'PY'
 from __future__ import annotations
 
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 video_dir = Path(sys.argv[1])
 audio_dir = Path(sys.argv[2])
-video_fps = float(sys.argv[3])
-work_dir = Path(sys.argv[4])
-plan_path = Path(sys.argv[5])
+h264_chunk_ms = round(float(sys.argv[3]) * 1000)
+probe_video_durations = sys.argv[4] == "1"
+lookback_seconds = float(sys.argv[5])
+work_dir = Path(sys.argv[6])
+plan_path = Path(sys.argv[7])
 
-VIDEO_PATTERN = re.compile(r"^camera-(\d+)\.mjpg$")
+VIDEO_PATTERNS = (
+    re.compile(r"^camera-(\d+)\.ts$"),
+    re.compile(r"^camera-(\d+)\.mp4$"),
+)
 AUDIO_PATTERN = re.compile(r"^audio-(\d+)\.wav$")
+TIMESTAMP_MS_THRESHOLD = 1_000_000_000_000
+
+now_ms = int(time.time() * 1000)
+window_start_ms = max(0, now_ms - round(lookback_seconds * 1000)) if lookback_seconds > 0 else None
+window_end_ms = now_ms if lookback_seconds > 0 else None
+
+
+def normalize_timestamp_ms(value: int) -> int:
+    return value if value >= TIMESTAMP_MS_THRESHOLD else value * 1000
 
 
 def timestamp_ms(path: Path, pattern: re.Pattern[str]) -> int | None:
     match = pattern.match(path.name)
-    return int(match.group(1)) if match else None
+    return normalize_timestamp_ms(int(match.group(1))) if match else None
 
 
 def run_ffprobe(args: list[str]) -> str:
@@ -73,38 +102,52 @@ def audio_duration_ms(path: Path) -> int:
     return max(0, round(float(output) * 1000))
 
 
-def video_duration_ms(path: Path) -> int:
+def h264_duration_ms(path: Path) -> int:
+    if not probe_video_durations:
+        return h264_chunk_ms
+
     output = run_ffprobe([
-        "-f",
-        "mjpeg",
-        "-framerate",
-        str(video_fps),
-        "-count_frames",
-        "-select_streams",
-        "v:0",
         "-show_entries",
-        "stream=nb_read_frames",
+        "format=duration",
         "-of",
         "default=noprint_wrappers=1:nokey=1",
         str(path),
     ])
-    frames = int(output.splitlines()[-1])
-    return max(0, round((frames / video_fps) * 1000))
+    return max(0, round(float(output) * 1000))
 
 
-def collect_chunks(directory: Path, pattern: re.Pattern[str], duration_fn):
+def in_window(start_ms: int, end_ms: int) -> bool:
+    if window_start_ms is not None and end_ms <= window_start_ms:
+        return False
+
+    if window_end_ms is not None and start_ms >= window_end_ms:
+        return False
+
+    return True
+
+
+def video_start_time(path: Path) -> int | None:
+    for pattern in VIDEO_PATTERNS:
+        start_ms = timestamp_ms(path, pattern)
+        if start_ms is not None:
+            return start_ms
+
+    return None
+
+
+def collect_audio_chunks(directory: Path):
     chunks: list[tuple[int, int, Path]] = []
 
     if not directory.exists():
         return chunks
 
     for path in sorted(directory.iterdir()):
-        start_ms = timestamp_ms(path, pattern)
+        start_ms = timestamp_ms(path, AUDIO_PATTERN)
         if start_ms is None:
             continue
 
         try:
-            duration_ms = duration_fn(path)
+            duration_ms = audio_duration_ms(path)
         except Exception as exc:
             print(f"skipping unreadable chunk: {path} ({exc})", file=sys.stderr)
             continue
@@ -112,13 +155,42 @@ def collect_chunks(directory: Path, pattern: re.Pattern[str], duration_fn):
         if duration_ms <= 0:
             continue
 
-        chunks.append((start_ms, start_ms + duration_ms, path))
+        end_ms = start_ms + duration_ms
+        if in_window(start_ms, end_ms):
+            chunks.append((start_ms, end_ms, path))
 
     return chunks
 
 
-videos = collect_chunks(video_dir, VIDEO_PATTERN, video_duration_ms)
-audios = collect_chunks(audio_dir, AUDIO_PATTERN, audio_duration_ms)
+def collect_video_chunks(directory: Path):
+    chunks: list[tuple[int, int, Path]] = []
+
+    if not directory.exists():
+        return chunks
+
+    for path in sorted(directory.iterdir()):
+        start_ms = video_start_time(path)
+        if start_ms is None:
+            continue
+
+        try:
+            duration_ms = h264_duration_ms(path)
+        except Exception as exc:
+            print(f"skipping unreadable chunk: {path} ({exc})", file=sys.stderr)
+            continue
+
+        if duration_ms <= 0:
+            continue
+
+        end_ms = start_ms + duration_ms
+        if in_window(start_ms, end_ms):
+            chunks.append((start_ms, end_ms, path))
+
+    return chunks
+
+
+videos = collect_video_chunks(video_dir)
+audios = collect_audio_chunks(audio_dir)
 
 segments: list[tuple[int, Path, Path, float, float, float, Path]] = []
 video_index = 0
@@ -128,8 +200,16 @@ while video_index < len(videos) and audio_index < len(audios):
     video_start, video_end, video_path = videos[video_index]
     audio_start, audio_end, audio_path = audios[audio_index]
 
-    overlap_start = max(video_start, audio_start)
-    overlap_end = min(video_end, audio_end)
+    overlap_start = max(
+        video_start,
+        audio_start,
+        window_start_ms if window_start_ms is not None else 0,
+    )
+    overlap_end = min(
+        video_end,
+        audio_end,
+        window_end_ms if window_end_ms is not None else max(video_end, audio_end),
+    )
 
     if overlap_end > overlap_start:
         segment_index = len(segments)
@@ -157,6 +237,8 @@ with plan_path.open("w", encoding="utf-8") as handle:
 print(f"video chunks: {len(videos)}")
 print(f"audio chunks: {len(audios)}")
 print(f"overlap segments: {len(segments)}")
+if window_start_ms is not None and window_end_ms is not None:
+    print(f"window: previous {lookback_seconds:g}s ({window_start_ms}..{window_end_ms})")
 PY
 
 if [[ ! -s "$PLAN_PATH" ]]; then
@@ -166,23 +248,22 @@ fi
 
 while IFS=$'\t' read -r index video_path audio_path video_offset audio_offset duration segment_path; do
   echo "building segment $index: ${duration}s"
+
   ffmpeg \
     -hide_banner \
     -loglevel error \
     -y \
-    -framerate "$VIDEO_FPS" \
-    -f mjpeg \
     -i "$video_path" \
     -i "$audio_path" \
-    -filter_complex "[0:v]trim=start=${video_offset}:duration=${duration},setpts=PTS-STARTPTS[v];[1:a]atrim=start=${audio_offset}:duration=${duration},asetpts=PTS-STARTPTS[a]" \
+    -filter_complex "[0:v]setpts=PTS-STARTPTS,trim=start=${video_offset}:duration=${duration},setpts=PTS-STARTPTS[v];[1:a]asetpts=PTS-STARTPTS,atrim=start=${audio_offset}:duration=${duration},asetpts=PTS-STARTPTS[a]" \
     -map "[v]" \
     -map "[a]" \
-    -c:v libx264 \
-    -preset veryfast \
-    -crf 20 \
+    -c:v "$VIDEO_ENCODER" \
+    -preset "$VIDEO_PRESET" \
+    -crf "$VIDEO_CRF" \
     -pix_fmt yuv420p \
-    -c:a aac \
-    -b:a 128k \
+    -c:a "$AUDIO_ENCODER" \
+    -b:a "$AUDIO_BITRATE" \
     -movflags +faststart \
     "$segment_path"
 
