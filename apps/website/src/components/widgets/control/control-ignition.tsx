@@ -13,7 +13,7 @@ function getStatusClassName(state: IgnitionState) {
     case IgnitionState.ON:
       return "bg-positive/20 text-positive border-positive/40";
     case IgnitionState.OFF:
-      return "bg-destructive/10 text-destructive border-destructive/30";
+      return "bg-destructive/10 text-destructive border-destructive/30 cursor-not-allowed";
     default:
       return "bg-muted text-muted-foreground border-border";
   }
