@@ -61,9 +61,6 @@ importers:
       date-fns:
         specifier: 4.4.0
         version: 4.4.0
-      hls.js:
-        specifier: ^1.6.16
-        version: 1.6.16
       next:
         specifier: 16.2.7
         version: 16.2.7(@babel/core@7.29.7)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -4973,12 +4970,6 @@ packages:
     resolution:
       {
         integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==,
-      }
-
-  hls.js@1.6.16:
-    resolution:
-      {
-        integrity: sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==,
       }
 
   hono@4.12.23:
@@ -11453,8 +11444,6 @@ snapshots:
   hermes-parser@0.25.1:
     dependencies:
       hermes-estree: 0.25.1
-
-  hls.js@1.6.16: {}
 
   hono@4.12.23: {}
 

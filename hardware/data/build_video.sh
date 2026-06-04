@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VIDEO_DIR="${VIDEO_DIR:-"$SCRIPT_DIR/video"}"
 AUDIO_DIR="${AUDIO_DIR:-"$SCRIPT_DIR/audio"}"
-H264_CHUNK_SECONDS="${H264_CHUNK_SECONDS:-1}"
+VIDEO_CHUNK_SECONDS="${VIDEO_CHUNK_SECONDS:-60}"
 VIDEO_PROBE_DURATIONS="${VIDEO_PROBE_DURATIONS:-0}"
 LOOKBACK_SECONDS="${LOOKBACK_SECONDS:-3600}"
 VIDEO_ENCODER="${VIDEO_ENCODER:-libx264}"
@@ -41,7 +41,7 @@ require_command python3
 python3 - \
   "$VIDEO_DIR" \
   "$AUDIO_DIR" \
-  "$H264_CHUNK_SECONDS" \
+  "$VIDEO_CHUNK_SECONDS" \
   "$VIDEO_PROBE_DURATIONS" \
   "$LOOKBACK_SECONDS" \
   "$WORK_DIR" \
@@ -56,16 +56,13 @@ from pathlib import Path
 
 video_dir = Path(sys.argv[1])
 audio_dir = Path(sys.argv[2])
-h264_chunk_ms = round(float(sys.argv[3]) * 1000)
+video_chunk_ms = round(float(sys.argv[3]) * 1000)
 probe_video_durations = sys.argv[4] == "1"
 lookback_seconds = float(sys.argv[5])
 work_dir = Path(sys.argv[6])
 plan_path = Path(sys.argv[7])
 
-VIDEO_PATTERNS = (
-    re.compile(r"^camera-(\d+)\.ts$"),
-    re.compile(r"^camera-(\d+)\.mp4$"),
-)
+VIDEO_PATTERN = re.compile(r"^camera-(\d+)\.mjpg$")
 AUDIO_PATTERN = re.compile(r"^audio-(\d+)\.wav$")
 TIMESTAMP_MS_THRESHOLD = 1_000_000_000_000
 
@@ -102,9 +99,9 @@ def audio_duration_ms(path: Path) -> int:
     return max(0, round(float(output) * 1000))
 
 
-def h264_duration_ms(path: Path) -> int:
+def video_duration_ms(path: Path) -> int:
     if not probe_video_durations:
-        return h264_chunk_ms
+        return video_chunk_ms
 
     output = run_ffprobe([
         "-show_entries",
@@ -127,12 +124,7 @@ def in_window(start_ms: int, end_ms: int) -> bool:
 
 
 def video_start_time(path: Path) -> int | None:
-    for pattern in VIDEO_PATTERNS:
-        start_ms = timestamp_ms(path, pattern)
-        if start_ms is not None:
-            return start_ms
-
-    return None
+    return timestamp_ms(path, VIDEO_PATTERN)
 
 
 def collect_audio_chunks(directory: Path):
@@ -174,7 +166,7 @@ def collect_video_chunks(directory: Path):
             continue
 
         try:
-            duration_ms = h264_duration_ms(path)
+            duration_ms = video_duration_ms(path)
         except Exception as exc:
             print(f"skipping unreadable chunk: {path} ({exc})", file=sys.stderr)
             continue
