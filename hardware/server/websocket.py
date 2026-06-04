@@ -11,7 +11,16 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 
 from calibration import CalibrationSet
-from config import HOST, PORT, PRESSURE_TRANSDUCER_COUNT, SERVO_ACTUATION_RANGE, SERVO_CHANNELS
+from config import (
+    HOST,
+    PORT,
+    PRESSURE_TRANSDUCER_COUNT,
+    SERVO_ACTUATION_RANGE,
+    SERVO_CHANNELS,
+    SYSTEM_TIME_SYNC_COMMAND_TIMEOUT_SECONDS,
+    SYSTEM_TIME_SYNC_ENABLED,
+    SYSTEM_TIME_SYNC_MIN_DRIFT_MS,
+)
 from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
 from read import LoadSampler, PressureSampler
@@ -174,6 +183,17 @@ def parse_optional_bool_param(params: Any, key: str, default: bool) -> bool:
     return value
 
 
+def parse_required_int_param(params: Any, key: str) -> int:
+    if not isinstance(params, dict) or params.get(key) is None:
+        raise ValueError("Invalid params")
+
+    value = int(params[key])
+    if value < 0:
+        raise ValueError("Invalid params")
+
+    return value
+
+
 def build_readings_result(
     include_history: bool = False,
     include_load: bool = True,
@@ -246,6 +266,92 @@ def build_readings_result(
             "startTime": start_time,
             "endTime": end_time,
         }
+
+    return result
+
+
+async def run_time_sync_command(client_time_ms: int) -> str | None:
+    epoch_seconds = f"@{client_time_ms / 1000:.3f}"
+    commands = (
+        ("date", "-u", "-s", epoch_seconds),
+        ("sudo", "-n", "date", "-u", "-s", epoch_seconds),
+    )
+    failures: list[str] = []
+
+    for command in commands:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            failures.append(f"{command[0]} not found: {exc}")
+            continue
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=SYSTEM_TIME_SYNC_COMMAND_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            failures.append(f"{' '.join(command)} timed out")
+            continue
+
+        if process.returncode == 0:
+            output = (stdout or b"").decode("utf-8", errors="replace").strip()
+            logger.info(
+                "system time sync command succeeded: command=%s output=%s",
+                command[0],
+                output,
+            )
+            return None
+
+        message = (stderr or stdout or b"").decode("utf-8", errors="replace").strip()
+        failures.append(f"{' '.join(command[:2])} exited {process.returncode}: {message}")
+
+    return "; ".join(failures)
+
+
+async def handle_sync_system_time(params: Any) -> dict[str, Any]:
+    client_time = parse_required_int_param(params, "clientTime")
+    server_time_before = int(time.time() * 1000)
+    offset_ms = client_time - server_time_before
+    applied = False
+    error: str | None = None
+
+    if not SYSTEM_TIME_SYNC_ENABLED:
+        error = "system_time_sync_disabled"
+    elif abs(offset_ms) >= SYSTEM_TIME_SYNC_MIN_DRIFT_MS:
+        error = await run_time_sync_command(client_time)
+        applied = error is None
+
+        if applied:
+            logger.warning(
+                "system time synced from client: offset_ms=%s client_time=%s",
+                offset_ms,
+                client_time,
+            )
+        else:
+            logger.warning(
+                "system time sync failed: offset_ms=%s client_time=%s error=%s",
+                offset_ms,
+                client_time,
+                error,
+            )
+
+    server_time_after = int(time.time() * 1000)
+    result = {
+        "applied": applied,
+        "offsetMs": offset_ms,
+        "serverTimeAfter": server_time_after,
+        "serverTimeBefore": server_time_before,
+    }
+
+    if error is not None:
+        result["error"] = error
 
     return result
 
@@ -673,6 +779,9 @@ async def dispatch_request(
 
     if method == "ignitionState":
         return build_ignition_snapshot()
+
+    if method == "syncSystemTime":
+        return await handle_sync_system_time(params)
 
     if method == "readings":
         include_history = isinstance(params, dict) and bool(params.get("history"))

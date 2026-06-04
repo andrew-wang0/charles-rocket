@@ -107,6 +107,8 @@ function handleMethod(method: string, params: unknown, id: JsonRpcId) {
       return okResponse(id, handleIgnitionControl(params));
     case "ignitionState":
       return okResponse(id, ignitionSnapshot());
+    case "syncSystemTime":
+      return okResponse(id, handleSyncSystemTime(params));
     case "readings":
       return okResponse(id, handleReadings(params));
     case "tare":
@@ -156,6 +158,23 @@ function handleIgnitionControl(params: unknown) {
 function ignitionSnapshot() {
   return {
     state: ignitionState,
+  };
+}
+
+function handleSyncSystemTime(params: unknown) {
+  const payload = asRecord(params);
+  const clientTime = Number(payload.clientTime);
+  const serverTimeBefore = Date.now();
+
+  if (!Number.isInteger(clientTime) || clientTime < 0) {
+    throw new Error("clientTime must be a nonnegative integer");
+  }
+
+  return {
+    applied: false,
+    offsetMs: clientTime - serverTimeBefore,
+    serverTimeAfter: Date.now(),
+    serverTimeBefore,
   };
 }
 

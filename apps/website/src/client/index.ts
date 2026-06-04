@@ -150,6 +150,33 @@ async function syncIgnitionState() {
   applyIgnitionSnapshot(snapshot);
 }
 
+async function syncSystemTime() {
+  await client.syncSystemTime({
+    clientTime: Date.now(),
+  });
+}
+
+async function initializeConnection() {
+  try {
+    await syncSystemTime();
+  } catch (error) {
+    console.warn("Failed to sync Pi system time", error);
+  }
+
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+
+  setState({
+    status: ConnectionStatus.CONNECTED,
+    connectionGeneration: connectionGeneration + 1,
+  });
+
+  void Promise.all([syncServoState(), syncIgnitionState()]).catch(() => {
+    ws?.close();
+  });
+}
+
 export function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
@@ -160,13 +187,7 @@ export function connect() {
   ws = new WebSocket(env.NEXT_PUBLIC_WS_URL);
 
   ws.addEventListener("open", () => {
-    setState({
-      status: ConnectionStatus.CONNECTED,
-      connectionGeneration: connectionGeneration + 1,
-    });
-    void Promise.all([syncServoState(), syncIgnitionState()]).catch(() => {
-      ws?.close();
-    });
+    void initializeConnection();
   });
 
   ws.addEventListener("close", () => {
