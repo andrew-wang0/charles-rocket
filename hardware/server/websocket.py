@@ -329,7 +329,7 @@ async def handle_sync_system_time(params: Any) -> dict[str, Any]:
         applied = error is None
 
         if applied:
-            logger.warning(
+            logger.info(
                 "system time synced from client: offset_ms=%s client_time=%s",
                 offset_ms,
                 client_time,
