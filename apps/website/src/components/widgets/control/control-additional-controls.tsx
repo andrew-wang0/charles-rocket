@@ -80,9 +80,21 @@ function ControlAdditionalServoButton({ index, label }: ControlAdditionalServoBu
 
 export function ControlAdditionalControls() {
   const { locked } = useWidgetLock();
+  const [open, setOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (locked) {
+      setOpen(false);
+    }
+  }, [locked]);
 
   return (
-    <Dialog>
+    <Dialog
+      open={locked ? false : open}
+      onOpenChange={(nextOpen) => {
+        setOpen(locked ? false : nextOpen);
+      }}
+    >
       <DialogTrigger asChild>
         <Button
           aria-label="Open additional controls"
