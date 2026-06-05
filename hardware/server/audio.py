@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 import wave
 from pathlib import Path
@@ -24,9 +25,16 @@ AUDIO_DEVICE_BUSY_RETRY_COUNT = 8
 AUDIO_DEVICE_BUSY_RETRY_SECONDS = 0.25
 AUDIO_STREAM_QUEUE_CHUNKS = 200
 AUDIO_READ_INTERVAL_SECONDS = 0.1
+AUDIO_DEVICE_UNAVAILABLE_RETRY_SECONDS = 5.0
+AUDIO_DEVICE_LIST_TIMEOUT_SECONDS = 2.0
+ARECORD_DEVICE_PATTERN = re.compile(r"card\s+(\d+):.*device\s+(\d+):")
 
 
 class AudioDeviceBusyError(RuntimeError):
+    pass
+
+
+class AudioDeviceUnavailableError(RuntimeError):
     pass
 
 
@@ -38,6 +46,7 @@ class WavAudioRecorder:
         self._file_handle: BinaryIO | None = None
         self._wave_writer: wave.Wave_write | None = None
         self._chunk_started_ms = 0
+        self._active_device = AUDIO_RECORD_DEVICE
         self._bytes_per_sample = self._sample_width_bytes()
         self._read_size = max(
             self._bytes_per_sample * AUDIO_RECORD_CHANNELS,
@@ -82,6 +91,9 @@ class WavAudioRecorder:
             except AudioDeviceBusyError as exc:
                 logger.warning("audio recording skipped because device stayed busy: %s", exc)
                 await asyncio.sleep(1)
+            except AudioDeviceUnavailableError as exc:
+                logger.warning("audio recording unavailable: %s", exc)
+                await asyncio.sleep(AUDIO_DEVICE_UNAVAILABLE_RETRY_SECONDS)
             except Exception:
                 logger.exception("audio recording stream failed")
                 await asyncio.sleep(1)
@@ -124,30 +136,83 @@ class WavAudioRecorder:
         return 2
 
     async def _record_stream(self) -> None:
-        for attempt in range(1, AUDIO_DEVICE_BUSY_RETRY_COUNT + 2):
-            try:
-                await self._record_stream_once()
-                return
-            except AudioDeviceBusyError:
-                if attempt > AUDIO_DEVICE_BUSY_RETRY_COUNT:
-                    raise
+        unavailable_messages: list[str] = []
 
-                logger.warning(
-                    "audio device busy; retrying chunk open: attempt=%s/%s delay=%ss device=%s",
-                    attempt,
-                    AUDIO_DEVICE_BUSY_RETRY_COUNT,
-                    AUDIO_DEVICE_BUSY_RETRY_SECONDS,
-                    AUDIO_RECORD_DEVICE,
-                )
-                await asyncio.sleep(AUDIO_DEVICE_BUSY_RETRY_SECONDS)
+        for device in await self._candidate_devices():
+            self._active_device = device
 
-    async def _record_stream_once(self) -> None:
-        logger.info("audio recording stream opening: device=%s", AUDIO_RECORD_DEVICE)
+            for attempt in range(1, AUDIO_DEVICE_BUSY_RETRY_COUNT + 2):
+                try:
+                    await self._record_stream_once(device)
+                    return
+                except AudioDeviceUnavailableError as exc:
+                    unavailable_messages.append(str(exc))
+                    break
+                except AudioDeviceBusyError:
+                    if attempt > AUDIO_DEVICE_BUSY_RETRY_COUNT:
+                        raise
+
+                    logger.warning(
+                        "audio device busy; retrying stream open: attempt=%s/%s delay=%ss device=%s",
+                        attempt,
+                        AUDIO_DEVICE_BUSY_RETRY_COUNT,
+                        AUDIO_DEVICE_BUSY_RETRY_SECONDS,
+                        device,
+                    )
+                    await asyncio.sleep(AUDIO_DEVICE_BUSY_RETRY_SECONDS)
+
+        detail = "; ".join(unavailable_messages) or "no ALSA capture devices found"
+        raise AudioDeviceUnavailableError(detail)
+
+    async def _candidate_devices(self) -> list[str]:
+        devices = [AUDIO_RECORD_DEVICE]
+
+        for device in await self._list_capture_devices():
+            if device not in devices:
+                devices.append(device)
+
+        return devices
+
+    async def _list_capture_devices(self) -> list[str]:
+        process = await asyncio.create_subprocess_exec(
+            "arecord",
+            "-l",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=AUDIO_DEVICE_LIST_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            logger.warning("audio capture device listing timed out")
+            return []
+
+        if process.returncode != 0:
+            return []
+
+        devices: list[str] = []
+        for line in stdout.decode("utf-8", errors="replace").splitlines():
+            match = ARECORD_DEVICE_PATTERN.search(line)
+            if match is None:
+                continue
+
+            card, device = match.groups()
+            devices.append(f"plughw:{card},{device}")
+
+        return devices
+
+    async def _record_stream_once(self, device: str) -> None:
+        logger.info("audio recording stream opening: device=%s", device)
         self._process = await asyncio.create_subprocess_exec(
             "arecord",
             "-q",
             "-D",
-            AUDIO_RECORD_DEVICE,
+            device,
             "-f",
             AUDIO_RECORD_SAMPLE_FORMAT,
             "-c",
@@ -189,6 +254,9 @@ class WavAudioRecorder:
             if self._is_device_busy_message(message):
                 raise AudioDeviceBusyError(message)
 
+            if self._is_device_unavailable_message(message):
+                raise AudioDeviceUnavailableError(f"{device}: {message}")
+
             raise RuntimeError(f"arecord exited with code {returncode}: {message}")
 
     def _record_chunk(self, chunk: bytes, timestamp_ms: int) -> None:
@@ -212,7 +280,7 @@ class WavAudioRecorder:
         self._wave_writer.setnchannels(AUDIO_RECORD_CHANNELS)
         self._wave_writer.setsampwidth(self._bytes_per_sample)
         self._wave_writer.setframerate(AUDIO_RECORD_SAMPLE_RATE)
-        logger.info("audio recording chunk opened: path=%s device=%s", path, AUDIO_RECORD_DEVICE)
+        logger.info("audio recording chunk opened: path=%s device=%s", path, self._active_device)
 
     def _close_chunk(self) -> None:
         wave_writer = self._wave_writer
@@ -238,6 +306,9 @@ class WavAudioRecorder:
 
     def _is_device_busy_message(self, message: str) -> bool:
         return "Device or resource busy" in message
+
+    def _is_device_unavailable_message(self, message: str) -> bool:
+        return "No such file or directory" in message or "No such device" in message
 
     async def _stop_process(self) -> None:
         process = self._process
