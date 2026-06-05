@@ -8,7 +8,6 @@ from typing import cast
 from aiohttp import web
 
 from config import (
-    AUDIO_STATUS_PATH,
     AUDIO_STREAM_PATH,
     AUDIO_STREAM_WS_PATH,
     VIDEO_STREAM_FPS,
@@ -143,14 +142,6 @@ async def audio_stream(request: web.Request) -> web.StreamResponse:
     return response
 
 
-async def audio_status(request: web.Request) -> web.Response:
-    audio_recorder = get_audio_recorder(request)
-    return web.json_response(
-        audio_recorder.status_payload(),
-        headers=stream_headers("application/json"),
-    )
-
-
 async def audio_pcm_stream(request: web.Request) -> web.WebSocketResponse:
     audio_recorder = get_audio_recorder(request)
     queue = audio_recorder.subscribe()
@@ -188,7 +179,6 @@ async def serve_video_server(audio_recorder: WavAudioRecorder) -> None:
     app.router.add_get(VIDEO_STREAM_PATH, camera_stream)
     app.router.add_get(AUDIO_STREAM_PATH, audio_stream)
     app.router.add_get(AUDIO_STREAM_WS_PATH, audio_pcm_stream)
-    app.router.add_get(AUDIO_STATUS_PATH, audio_status)
 
     runner = web.AppRunner(app)
     await runner.setup()

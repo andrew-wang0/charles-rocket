@@ -28,6 +28,7 @@ export const readings = method({
       servoControllerOk: z.boolean(),
       pressureSensorsOk: z.array(z.boolean()).length(PRESSURE_TRANSDUCER_COUNT),
       loadSensorOk: z.boolean(),
+      audioOk: z.boolean(),
     }),
     data: z.object({
       load: timedReadings,

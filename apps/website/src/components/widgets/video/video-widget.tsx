@@ -9,10 +9,10 @@ import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { env } from "@/env";
 import { useConnectionGeneration, useConnectionStatus } from "@/hooks/use-connection-status";
+import { useStore } from "@/lib/store";
 import { cn } from "@/lib/util/cn";
 
 const STREAM_RETRY_MS = 2_000;
-const AUDIO_STATUS_POLL_MS = 2_000;
 const AUDIO_START_DELAY_SECONDS = 0.06;
 const AUDIO_MAX_BUFFER_SECONDS = 0.35;
 const PCM_SAMPLE_RATE = 48_000;
@@ -21,7 +21,7 @@ const PCM_CHANNELS = 1;
 export function VideoWidget() {
   const [attempt, setAttempt] = React.useState(0);
   const [audioMuted, setAudioMuted] = React.useState(true);
-  const [audioAvailable, setAudioAvailable] = React.useState(false);
+  const audioAvailable = useStore((store) => store.readingsStatus.audioOk);
   const audioContextRef = React.useRef<AudioContext | null>(null);
   const audioSocketRef = React.useRef<WebSocket | null>(null);
   const nextAudioTimeRef = React.useRef(0);
@@ -43,19 +43,6 @@ export function VideoWidget() {
     url.searchParams.set("connection", String(connectionGeneration));
     return url.toString();
   }, [attempt, connectionGeneration]);
-
-  const audioStatusUrl = React.useMemo(() => {
-    const url = new URL(env.NEXT_PUBLIC_AUDIO_URL);
-    url.pathname = "/audio/status";
-    if (url.protocol === "ws:") {
-      url.protocol = "http:";
-    } else if (url.protocol === "wss:") {
-      url.protocol = "https:";
-    }
-
-    url.searchParams.set("connection", String(connectionGeneration));
-    return url.toString();
-  }, [connectionGeneration]);
 
   const audioSocketUrl = React.useMemo(() => {
     const url = new URL(env.NEXT_PUBLIC_AUDIO_URL);
@@ -118,43 +105,6 @@ export function VideoWidget() {
   }, [hasSignal, status]);
 
   React.useEffect(() => {
-    if (status !== ConnectionStatus.CONNECTED) {
-      return;
-    }
-
-    let ignore = false;
-    const updateAudioStatus = async () => {
-      try {
-        const response = await fetch(audioStatusUrl, { cache: "no-store" });
-        if (!response.ok) throw new Error(`audio_status_${response.status}`);
-
-        const payload = (await response.json()) as { available?: unknown };
-        if (ignore) return;
-
-        const nextAudioAvailable = payload.available === true;
-        setAudioAvailable(nextAudioAvailable);
-        if (!nextAudioAvailable) {
-          setAudioMuted(true);
-        }
-      } catch {
-        if (ignore) return;
-        setAudioAvailable(false);
-        setAudioMuted(true);
-      }
-    };
-
-    void updateAudioStatus();
-    const interval = window.setInterval(() => {
-      void updateAudioStatus();
-    }, AUDIO_STATUS_POLL_MS);
-
-    return () => {
-      ignore = true;
-      window.clearInterval(interval);
-    };
-  }, [audioStatusUrl, status]);
-
-  React.useEffect(() => {
     if (audioMuted || !audioAvailable || status !== ConnectionStatus.CONNECTED) {
       audioSocketRef.current?.close();
       audioSocketRef.current = null;
@@ -180,7 +130,6 @@ export function VideoWidget() {
     socket.onerror = () => {
       if (ignore) return;
       setAudioMuted(true);
-      setAudioAvailable(false);
     };
 
     socket.onclose = () => {

@@ -24,6 +24,7 @@ from config import (
 from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
 from read import LoadSampler, PressureSampler
+from server.audio import WavAudioRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ servo_controller: ServoController | None = None
 ignition_controller: IgnitionController | None = None
 pressure_sampler: PressureSampler | None = None
 load_sampler: LoadSampler | None = None
+audio_recorder: WavAudioRecorder | None = None
 clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
 transition_tasks: set[asyncio.Task[None]] = set()
@@ -228,6 +230,11 @@ def build_readings_result(
             "loadSensorOk": (
                 load_sampler.status_payload()
                 if load_sampler is not None
+                else False
+            ),
+            "audioOk": (
+                bool(audio_recorder.status_payload().get("available"))
+                if audio_recorder is not None
                 else False
             ),
         },
@@ -901,8 +908,14 @@ async def handler(websocket: Any, _path: str | None = None) -> None:
         client_send_locks.pop(websocket, None)
 
 
-async def serve_websocket_server(calibration_set: CalibrationSet) -> None:
+async def serve_websocket_server(
+    calibration_set: CalibrationSet,
+    shared_audio_recorder: WavAudioRecorder,
+) -> None:
+    global audio_recorder
+
     logger.info("Starting Charles hardware websocket server on ws://%s:%s", HOST, PORT)
+    audio_recorder = shared_audio_recorder
     initialize_control_runtime(calibration_set)
 
     try:

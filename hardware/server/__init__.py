@@ -27,7 +27,7 @@ async def main() -> None:
     audio_recorder = WavAudioRecorder()
     services = {
         "audio": asyncio.create_task(serve_audio_recorder(audio_recorder)),
-        "websocket": asyncio.create_task(serve_websocket_server(calibration_set)),
+        "websocket": asyncio.create_task(serve_websocket_server(calibration_set, audio_recorder)),
         "video": asyncio.create_task(serve_video_server(audio_recorder)),
     }
     monitor_tasks = {

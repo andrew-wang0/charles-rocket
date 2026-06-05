@@ -20,6 +20,7 @@ export type ReadingsStatus = {
   servoControllerOk: boolean;
   pressureSensorsOk: boolean[];
   loadSensorOk: boolean;
+  audioOk: boolean;
 };
 
 type Store = {
@@ -80,6 +81,7 @@ function areReadingsStatusesEqual(left: ReadingsStatus, right: ReadingsStatus) {
   return (
     left.servoControllerOk === right.servoControllerOk &&
     left.loadSensorOk === right.loadSensorOk &&
+    left.audioOk === right.audioOk &&
     left.pressureSensorsOk.length === right.pressureSensorsOk.length &&
     left.pressureSensorsOk.every((value, index) => value === right.pressureSensorsOk[index])
   );
@@ -187,6 +189,7 @@ export const useStore = create<Store>((set) => ({
     servoControllerOk: false,
     pressureSensorsOk: Array.from({ length: PRESSURE_TRANSDUCER_COUNT }, () => false),
     loadSensorOk: false,
+    audioOk: false,
   },
 
   ignitionState: IgnitionState.UNKNOWN,
