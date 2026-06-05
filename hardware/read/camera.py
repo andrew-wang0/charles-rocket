@@ -27,6 +27,10 @@ JPEG_START_MARKER = b"\xff\xd8"
 JPEG_END_MARKER = b"\xff\xd9"
 
 
+class CameraFrameEncodingError(RuntimeError):
+    pass
+
+
 class MjpegRecorder:
     def __init__(self) -> None:
         self._data_dir = Path(__file__).resolve().parents[1] / "data" / "video"
@@ -119,6 +123,7 @@ class CameraReader:
         self._capture: Any | None = None
         self._latest_frame: bytes | None = None
         self._last_frame_time_ms = 0
+        self._use_mjpeg_passthrough = True
         self._using_encoded_passthrough = False
         self._logged_decode_fallback = False
         self._recorder = MjpegRecorder()
@@ -183,6 +188,30 @@ class CameraReader:
         if format_prop is not None:
             capture.set(format_prop, -1)
 
+    def _enable_decoded_frames(self, capture: Any) -> None:
+        convert_rgb_prop = getattr(self._cv2, "CAP_PROP_CONVERT_RGB", None)
+        if convert_rgb_prop is not None:
+            capture.set(convert_rgb_prop, 1)
+
+    def _describe_frame(self, frame: Any) -> str:
+        details = [f"type={type(frame).__name__}"]
+
+        shape = getattr(frame, "shape", None)
+        if shape is not None:
+            details.append(f"shape={shape}")
+
+        dtype = getattr(frame, "dtype", None)
+        if dtype is not None:
+            details.append(f"dtype={dtype}")
+
+        if hasattr(frame, "tobytes"):
+            try:
+                details.append(f"bytes={len(frame.tobytes())}")
+            except Exception:
+                details.append("bytes=unavailable")
+
+        return " ".join(details)
+
     def _extract_direct_jpeg(self, frame: Any) -> bytes | None:
         if not hasattr(frame, "tobytes"):
             return None
@@ -216,27 +245,27 @@ class CameraReader:
             return None
 
         if not self._logged_decode_fallback:
-            logger.warning(
-                "camera MJPEG passthrough unavailable; encoding decoded frames in software"
-            )
+            logger.warning("camera frames are being JPEG-encoded in software")
             self._logged_decode_fallback = True
 
         return encoded.tobytes()
 
     def _extract_mjpeg_frame(self, frame: Any) -> bytes:
-        direct_jpeg = self._extract_direct_jpeg(frame)
-        if direct_jpeg is not None:
-            self._using_encoded_passthrough = True
-            return direct_jpeg
+        if self._use_mjpeg_passthrough:
+            direct_jpeg = self._extract_direct_jpeg(frame)
+            if direct_jpeg is not None:
+                self._using_encoded_passthrough = True
+                return direct_jpeg
 
         encoded_frame = self._encode_decoded_frame(frame)
         if encoded_frame is not None:
             self._using_encoded_passthrough = False
             return encoded_frame
 
-        raise RuntimeError(
-            "camera_mjpeg_passthrough_unavailable:"
-            "backend did not return encoded or encodable JPEG frames"
+        raise CameraFrameEncodingError(
+            "camera_frame_encoding_failed:"
+            "backend returned neither JPEG bytes nor an encodable frame "
+            f"({self._describe_frame(frame)})"
         )
 
     def _open_capture(self) -> bool:
@@ -263,7 +292,13 @@ class CameraReader:
         if buffer_size_prop is not None:
             capture.set(buffer_size_prop, VIDEO_CAPTURE_BUFFER_SIZE)
 
-        self._enable_mjpeg_passthrough(capture)
+        if self._use_mjpeg_passthrough:
+            self._enable_mjpeg_passthrough(capture)
+            passthrough_mode = "requested"
+        else:
+            self._enable_decoded_frames(capture)
+            passthrough_mode = "disabled"
+
         self._capture = capture
         self._logged_decode_fallback = False
 
@@ -272,7 +307,7 @@ class CameraReader:
         logger.info(
             (
                 "camera ready: device=%s requested=%sx%s@%sfps actual=%sx%s@%.2ffps "
-                "codec=%s passthrough=requested format=%s"
+                "codec=%s passthrough=%s format=%s"
             ),
             VIDEO_DEVICE_PATH,
             VIDEO_FRAME_WIDTH,
@@ -282,6 +317,7 @@ class CameraReader:
             int(capture.get(self._cv2.CAP_PROP_FRAME_HEIGHT)),
             capture.get(self._cv2.CAP_PROP_FPS),
             actual_fourcc,
+            passthrough_mode,
             actual_format,
         )
         return True
@@ -315,7 +351,28 @@ class CameraReader:
                 with self._lock:
                     self._latest_frame = encoded
                     self._last_frame_time_ms = now_ms
+                self.error = None
                 self._recorder.record_frame(encoded, now_ms)
+            except CameraFrameEncodingError as exc:
+                self.error = str(exc)
+                if self._use_mjpeg_passthrough:
+                    logger.warning(
+                        (
+                            "camera MJPEG passthrough failed; reopening with "
+                            "software JPEG encoding: %s"
+                        ),
+                        exc,
+                    )
+                    self._use_mjpeg_passthrough = False
+                    self._close_capture()
+                    continue
+
+                logger.exception("camera capture failed")
+                with self._lock:
+                    self._latest_frame = None
+                    self._last_frame_time_ms = 0
+                self._close_capture()
+                time.sleep(VIDEO_RETRY_SECONDS)
             except Exception as exc:
                 self.error = str(exc)
                 logger.exception("camera capture failed")
