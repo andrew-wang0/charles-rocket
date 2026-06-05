@@ -8,9 +8,9 @@ import { WidgetCard } from "@/components/widgets/widget-card";
 import { WidgetLockProvider } from "@/components/widgets/widget-lock";
 import { WidgetLockToggleButton } from "@/components/widgets/widget-lock-toggle-button";
 
+import { ControlAdditionalControls } from "./control-additional-controls";
 import { ControlIgnition } from "./control-ignition";
 import { ControlServo } from "./control-servo";
-import { ControlShutoffAll } from "./control-shutoff-all";
 
 export function ControlWidget() {
   return (
@@ -18,13 +18,12 @@ export function ControlWidget() {
       <WidgetCard size="sm">
         <CardHeader>
           <CardTitle>Control</CardTitle>
-          <CardAction>
+          <CardAction className="flex items-center gap-1">
             <WidgetLockToggleButton />
+            <ControlAdditionalControls />
           </CardAction>
         </CardHeader>
         <CardContent className="flex size-full gap-x-2">
-          <ControlShutoffAll />
-          <Separator orientation="vertical" />
           <div className="flex w-full gap-x-2">
             <ControlServo indexes={[0]} className="w-1/3" />
             <Separator orientation="vertical" />

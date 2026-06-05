@@ -21,7 +21,7 @@ from config import (
     SERVO_SLOW_CLOSE_CHANNELS,
     SERVO_SLOW_CLOSE_SECONDS,
     SERVO_SLOW_CLOSE_STEP_SECONDS,
-    SERVO_SLOW_OPEN_CHANNEL,
+    SERVO_SLOW_OPEN_CHANNELS,
     SERVO_SLOW_OPEN_SECONDS,
     SERVO_SLOW_OPEN_STEP_SECONDS,
     SERVO_TRANSITION_SECONDS,
@@ -51,11 +51,11 @@ class ServoController:
         self._angles: dict[int, float | None] = {channel: None for channel in SERVO_CHANNELS}
         self._states: dict[int, ServoState] = {channel: "unknown" for channel in SERVO_CHANNELS}
         self._open_angles = {
-            channel: (calibration[index].open if calibration else SERVO_OPEN_ANGLE)
+            channel: self._calibrated_angle(calibration, index, "open", SERVO_OPEN_ANGLE)
             for index, channel in enumerate(SERVO_CHANNELS)
         }
         self._close_angles = {
-            channel: (calibration[index].close if calibration else SERVO_CLOSED_ANGLE)
+            channel: self._calibrated_angle(calibration, index, "close", SERVO_CLOSED_ANGLE)
             for index, channel in enumerate(SERVO_CHANNELS)
         }
 
@@ -101,6 +101,19 @@ class ServoController:
         self._pca = None
         self.available = False
         logger.info("servo controller shutdown finished")
+
+    def _calibrated_angle(
+        self,
+        calibration: Sequence[ServoCalibrationEntry] | None,
+        index: int,
+        field: ServoStableState,
+        fallback: float,
+    ) -> float:
+        if calibration is None or index >= len(calibration):
+            return fallback
+
+        entry = calibration[index]
+        return entry.open if field == "open" else entry.close
 
     def state_payload(self) -> dict[str, list[ServoChannelState]]:
         return {
@@ -152,7 +165,7 @@ class ServoController:
             self._states[channel] = "closed"
 
     def _uses_slow_open(self, channel: int, target_state: ServoStableState) -> bool:
-        return channel == SERVO_SLOW_OPEN_CHANNEL and target_state == "open"
+        return channel in SERVO_SLOW_OPEN_CHANNELS and target_state == "open"
 
     def _uses_slow_close(self, channel: int, target_state: ServoStableState) -> bool:
         return channel in SERVO_SLOW_CLOSE_CHANNELS and target_state == "closed"
@@ -162,6 +175,13 @@ class ServoController:
             channel,
             target_state,
         )
+
+    def _can_start_transition(
+        self,
+        current_state: ServoState,
+        target_state: ServoStableState,
+    ) -> bool:
+        return target_state == "closed" and current_state in ("opening", "closing")
 
     def _transition_state_for_target(self, target_state: ServoStableState) -> ServoTransitionState:
         return "opening" if target_state == "open" else "closing"
@@ -221,9 +241,7 @@ class ServoController:
     async def _start_transitions(self, channels: list[int], target_state: ServoStableState) -> list[int]:
         for channel in channels:
             current_state = self._states[channel]
-            if current_state == "opening" and target_state == "closed":
-                continue
-            if current_state == "closing" and target_state == "closed":
+            if self._can_start_transition(current_state, target_state):
                 continue
             if current_state in ("opening", "closing"):
                 raise ValueError("servo_busy")

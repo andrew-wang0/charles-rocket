@@ -11,6 +11,10 @@ const SAMPLE_INTERVAL_MS = 50;
 const LOAD_SENSOR_MAX_LB = 200;
 const DEFAULT_PORT = 8765;
 const DEFAULT_HOST = "0.0.0.0";
+const SERVO_TRANSITION_MS = 400;
+const SERVO_SLOW_TRANSITION_MS = 15_000;
+const SERVO_SLOW_OPEN_INDEXES = new Set([0, 3]);
+const SERVO_SLOW_CLOSE_INDEXES = new Set([1, 2, 3]);
 
 type JsonRpcId = string | number | null;
 type TimedReading = {
@@ -26,6 +30,7 @@ type JsonRpcRequest = {
 };
 
 const servoStates = Array.from({ length: SERVO_COUNT }, () => ServoState.CLOSED);
+const servoTransitionTimers = new Map<number, ReturnType<typeof setTimeout>>();
 let ignitionState = IgnitionState.OFF;
 const pressureBuffers: TimedReading[][] = Array.from(
   { length: PRESSURE_TRANSDUCER_COUNT },
@@ -87,7 +92,7 @@ async function handleMessage(socket: WebSocket, raw: string) {
   const isNotification = request.id === undefined;
 
   try {
-    const response = handleMethod(request.method, request.params, id);
+    const response = handleMethod(socket, request.method, request.params, id);
     if (isNotification) return;
 
     await send(socket, response);
@@ -97,10 +102,12 @@ async function handleMessage(socket: WebSocket, raw: string) {
   }
 }
 
-function handleMethod(method: string, params: unknown, id: JsonRpcId) {
+function handleMethod(socket: WebSocket, method: string, params: unknown, id: JsonRpcId) {
   switch (method) {
     case "servoControl":
-      return okResponse(id, handleServoControl(params));
+      return okResponse(id, handleServoControl(socket, params));
+    case "servoControlMany":
+      return okResponse(id, handleServoControlMany(socket, params));
     case "servoState":
       return okResponse(id, servoSnapshot());
     case "ignitionControl":
@@ -118,25 +125,170 @@ function handleMethod(method: string, params: unknown, id: JsonRpcId) {
   }
 }
 
-function handleServoControl(params: unknown) {
+function handleServoControl(socket: WebSocket, params: unknown) {
   const payload = asRecord(params);
   const index = Number(payload.index);
   const nextState = payload.set;
 
-  if (!Number.isInteger(index) || index < 0 || index >= SERVO_COUNT) {
-    throw new Error("servoControl index must be a valid servo number");
-  }
+  assertServoTarget(nextState);
+  assertServoIndex(index, "servoControl index must be a valid servo number");
 
-  if (nextState !== ServoState.OPEN && nextState !== ServoState.CLOSED) {
-    throw new Error("servoControl set must be OPEN or CLOSED");
+  const transitionedIndexes = startServoTransitions([index], nextState);
+  if (transitionedIndexes.length > 0) {
+    broadcastServoState({ exclude: socket });
   }
-
-  servoStates[index] = nextState;
 
   return {
     result: "success",
     ...servoSnapshot(),
   };
+}
+
+function handleServoControlMany(socket: WebSocket, params: unknown) {
+  const payload = asRecord(params);
+  const indexes = payload.indexes;
+  const nextState = payload.set;
+
+  assertServoTarget(nextState);
+
+  if (!Array.isArray(indexes) || indexes.length === 0 || indexes.length > SERVO_COUNT) {
+    throw new Error("servoControlMany indexes must be a nonempty servo index list");
+  }
+
+  const seen = new Set<number>();
+
+  const requestIndexes: number[] = [];
+
+  for (const value of indexes) {
+    const index = Number(value);
+    assertServoIndex(index, "servoControlMany indexes must be valid servo numbers");
+
+    if (seen.has(index)) {
+      throw new Error("servoControlMany indexes must be unique");
+    }
+
+    seen.add(index);
+    requestIndexes.push(index);
+  }
+
+  const transitionedIndexes = startServoTransitions(requestIndexes, nextState);
+  if (transitionedIndexes.length > 0) {
+    broadcastServoState({ exclude: socket });
+  }
+
+  return {
+    result: "success",
+    ...servoSnapshot(),
+  };
+}
+
+function assertServoIndex(index: number, message: string): asserts index is number {
+  if (!Number.isInteger(index) || index < 0 || index >= SERVO_COUNT) {
+    throw new Error(message);
+  }
+}
+
+function assertServoTarget(value: unknown): asserts value is ServoState.OPEN | ServoState.CLOSED {
+  if (value !== ServoState.OPEN && value !== ServoState.CLOSED) {
+    throw new Error("servoControl set must be OPEN or CLOSED");
+  }
+}
+
+function startServoTransitions(
+  indexes: number[],
+  targetState: ServoState.OPEN | ServoState.CLOSED,
+) {
+  const transitionedIndexes: number[] = [];
+
+  for (const index of indexes) {
+    const currentState = servoStates[index];
+
+    if (canServoStartTransition(currentState, targetState)) {
+      continue;
+    }
+
+    if (isServoSwitching(currentState)) {
+      throw new Error("servo_busy");
+    }
+  }
+
+  for (const index of indexes) {
+    if (servoStates[index] === targetState) continue;
+
+    clearServoTransition(index);
+    servoStates[index] = getServoTransitionState(targetState);
+    transitionedIndexes.push(index);
+    scheduleServoTransitionFinish(index, targetState);
+  }
+
+  return transitionedIndexes;
+}
+
+function scheduleServoTransitionFinish(
+  index: number,
+  targetState: ServoState.OPEN | ServoState.CLOSED,
+) {
+  const transitionState = getServoTransitionState(targetState);
+  const timer = setTimeout(
+    () => {
+      servoTransitionTimers.delete(index);
+
+      if (servoStates[index] !== transitionState) return;
+
+      servoStates[index] = targetState;
+      broadcastServoState();
+    },
+    getServoTransitionMs(index, targetState),
+  );
+
+  servoTransitionTimers.set(index, timer);
+}
+
+function clearServoTransition(index: number) {
+  const timer = servoTransitionTimers.get(index);
+  if (timer === undefined) return;
+
+  clearTimeout(timer);
+  servoTransitionTimers.delete(index);
+}
+
+function canServoStartTransition(
+  currentState: ServoState,
+  targetState: ServoState.OPEN | ServoState.CLOSED,
+) {
+  return (
+    targetState === ServoState.CLOSED &&
+    (currentState === ServoState.OPENING || currentState === ServoState.CLOSING)
+  );
+}
+
+function getServoTransitionState(targetState: ServoState.OPEN | ServoState.CLOSED) {
+  return targetState === ServoState.OPEN ? ServoState.OPENING : ServoState.CLOSING;
+}
+
+function getServoTransitionMs(index: number, targetState: ServoState.OPEN | ServoState.CLOSED) {
+  if (targetState === ServoState.OPEN && SERVO_SLOW_OPEN_INDEXES.has(index)) {
+    return SERVO_SLOW_TRANSITION_MS;
+  }
+
+  if (targetState === ServoState.CLOSED && SERVO_SLOW_CLOSE_INDEXES.has(index)) {
+    return SERVO_SLOW_TRANSITION_MS;
+  }
+
+  return SERVO_TRANSITION_MS;
+}
+
+function isServoSwitching(state: ServoState) {
+  return state === ServoState.OPENING || state === ServoState.CLOSING;
+}
+
+function broadcastServoState(options: { exclude?: WebSocket } = {}) {
+  const payload = notify("servoState", servoSnapshot());
+
+  for (const client of wss.clients) {
+    if (client === options.exclude) continue;
+    void send(client, payload);
+  }
 }
 
 function handleIgnitionControl(params: unknown) {
@@ -407,6 +559,14 @@ function okResponse(id: JsonRpcId, result: unknown) {
   };
 }
 
+function notify(method: string, params: unknown) {
+  return {
+    jsonrpc: "2.0" as const,
+    method,
+    params,
+  };
+}
+
 function errorResponse(id: JsonRpcId, code: number, message: string) {
   return {
     jsonrpc: "2.0" as const,
@@ -425,5 +585,9 @@ async function send(socket: WebSocket, payload: unknown) {
 
 function shutdown() {
   clearInterval(sampler);
+  for (const timer of servoTransitionTimers.values()) {
+    clearTimeout(timer);
+  }
+  servoTransitionTimers.clear();
   wss.close();
 }
