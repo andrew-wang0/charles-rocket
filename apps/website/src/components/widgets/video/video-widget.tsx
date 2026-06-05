@@ -45,8 +45,7 @@ export function VideoWidget() {
   }, [attempt, connectionGeneration]);
 
   const audioSocketUrl = React.useMemo(() => {
-    const url = new URL(env.NEXT_PUBLIC_AUDIO_URL);
-    url.pathname = "/audio.raw";
+    const url = new URL(env.NEXT_PUBLIC_AUDIO_STREAM_URL);
     if (url.protocol === "http:") {
       url.protocol = "ws:";
     } else if (url.protocol === "https:") {

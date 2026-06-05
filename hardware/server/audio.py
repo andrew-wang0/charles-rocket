@@ -115,27 +115,6 @@ class WavAudioRecorder:
         self._clients.discard(queue)
         logger.info("audio stream client disconnected: clients=%s", len(self._clients))
 
-    def wav_header(self) -> bytes:
-        byte_rate = AUDIO_RECORD_SAMPLE_RATE * AUDIO_RECORD_CHANNELS * self._bytes_per_sample
-        block_align = AUDIO_RECORD_CHANNELS * self._bytes_per_sample
-        bits_per_sample = self._bytes_per_sample * 8
-
-        return (
-            b"RIFF"
-            + (0xFFFFFFFF).to_bytes(4, "little")
-            + b"WAVE"
-            + b"fmt "
-            + (16).to_bytes(4, "little")
-            + (1).to_bytes(2, "little")
-            + AUDIO_RECORD_CHANNELS.to_bytes(2, "little")
-            + AUDIO_RECORD_SAMPLE_RATE.to_bytes(4, "little")
-            + byte_rate.to_bytes(4, "little")
-            + block_align.to_bytes(2, "little")
-            + bits_per_sample.to_bytes(2, "little")
-            + b"data"
-            + (0xFFFFFFFF).to_bytes(4, "little")
-        )
-
     def status_payload(self) -> dict[str, bool | int | str | None]:
         now = time.monotonic()
         available = (
