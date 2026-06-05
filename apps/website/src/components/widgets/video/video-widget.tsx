@@ -1,8 +1,10 @@
 "use client";
 
+import { SpeakerHighIcon, SpeakerSlashIcon } from "@phosphor-icons/react";
 import React from "react";
 
 import { ConnectionStatus } from "@/client";
+import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { env } from "@/env";
@@ -13,6 +15,8 @@ const STREAM_RETRY_MS = 2_000;
 
 export function VideoWidget() {
   const [attempt, setAttempt] = React.useState(0);
+  const [audioMuted, setAudioMuted] = React.useState(true);
+  const audioRef = React.useRef<HTMLAudioElement>(null);
   const status = useConnectionStatus();
   const connectionGeneration = useConnectionGeneration();
   const [loadedStreamKey, setLoadedStreamKey] = React.useState<string | null>(null);
@@ -32,6 +36,18 @@ export function VideoWidget() {
     return url.toString();
   }, [attempt, connectionGeneration]);
 
+  const audioUrl = React.useMemo(() => {
+    const url = new URL(env.NEXT_PUBLIC_AUDIO_URL);
+    if (url.protocol === "ws:") {
+      url.protocol = "http:";
+    } else if (url.protocol === "wss:") {
+      url.protocol = "https:";
+    }
+
+    url.searchParams.set("connection", String(connectionGeneration));
+    return url.toString();
+  }, [connectionGeneration]);
+
   React.useEffect(() => {
     if (hasSignal || status !== ConnectionStatus.CONNECTED) return;
 
@@ -44,10 +60,37 @@ export function VideoWidget() {
     };
   }, [hasSignal, status]);
 
+  const toggleAudio = () => {
+    const nextMuted = !audioMuted;
+    setAudioMuted(nextMuted);
+
+    const audio = audioRef.current;
+    if (audio === null) return;
+
+    audio.muted = nextMuted;
+    if (!nextMuted) {
+      void audio.play().catch(() => {
+        setAudioMuted(true);
+        audio.muted = true;
+      });
+    }
+  };
+
   return (
     <WidgetCard size="sm">
-      <CardHeader>
+      <CardHeader className="flex items-center justify-between">
         <CardTitle>Video Feed</CardTitle>
+        <Button
+          aria-label={audioMuted ? "Unmute audio" : "Mute audio"}
+          disabled={status !== ConnectionStatus.CONNECTED}
+          onClick={toggleAudio}
+          size="icon-xs"
+          title={audioMuted ? "Unmute audio" : "Mute audio"}
+          type="button"
+          variant="outline"
+        >
+          {audioMuted ? <SpeakerSlashIcon /> : <SpeakerHighIcon />}
+        </Button>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1">
         <div
@@ -69,6 +112,16 @@ export function VideoWidget() {
               setLoadedStreamKey(streamKey);
             }}
             src={streamUrl}
+          />
+          <audio
+            autoPlay
+            className="hidden"
+            muted={audioMuted}
+            onError={() => {
+              setAudioMuted(true);
+            }}
+            ref={audioRef}
+            src={audioUrl}
           />
           {!hasSignal ? (
             <div className="bg-muted text-muted-foreground absolute border p-2 text-sm">

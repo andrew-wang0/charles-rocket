@@ -6,3 +6,4 @@ adafruit-circuitpython-pca9685
 rpi-lgpio
 hx711
 websockets
+opencv-python

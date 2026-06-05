@@ -7,19 +7,31 @@ from typing import cast
 
 from aiohttp import web
 
-from config import VIDEO_STREAM_FPS, VIDEO_STREAM_HOST, VIDEO_STREAM_PATH, VIDEO_STREAM_PORT
+from config import (
+    AUDIO_STREAM_PATH,
+    VIDEO_STREAM_FPS,
+    VIDEO_STREAM_HOST,
+    VIDEO_STREAM_PATH,
+    VIDEO_STREAM_PORT,
+)
 from read import CameraReader
+from server.audio import WavAudioRecorder
 
 logger = logging.getLogger(__name__)
 
 BOUNDARY = "frame"
 CAMERA_READER_APP_KEY = "camera_reader"
+AUDIO_RECORDER_APP_KEY = "audio_recorder"
 VIDEO_SHUTDOWN_TIMEOUT_SECONDS = 0.1
 INITIAL_FRAME_TIMEOUT_SECONDS = 1.0
 
 
 def get_camera_reader(request: web.Request) -> CameraReader:
     return cast(CameraReader, request.app[CAMERA_READER_APP_KEY])
+
+
+def get_audio_recorder(request: web.Request) -> WavAudioRecorder:
+    return cast(WavAudioRecorder, request.app[AUDIO_RECORDER_APP_KEY])
 
 
 async def wait_for_frame(camera_reader: CameraReader, timeout_seconds: float) -> bytes | None:
@@ -95,14 +107,50 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
     return response
 
 
-async def serve_video_server() -> None:
+async def audio_stream(request: web.Request) -> web.StreamResponse:
+    audio_recorder = get_audio_recorder(request)
+    queue = audio_recorder.subscribe()
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "audio/wav",
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Connection": "close",
+        },
+    )
+    await response.prepare(request)
+
+    try:
+        await response.write(audio_recorder.wav_header())
+
+        while True:
+            chunk = await queue.get()
+            await response.write(chunk)
+    except asyncio.CancelledError:
+        raise
+    except (ConnectionError, ConnectionResetError, BrokenPipeError):
+        pass
+    except Exception:
+        logger.exception("audio stream failed")
+    finally:
+        audio_recorder.unsubscribe(queue)
+        with contextlib.suppress(Exception):
+            await response.write_eof()
+
+    return response
+
+
+async def serve_video_server(audio_recorder: WavAudioRecorder) -> None:
     camera_reader = CameraReader()
     if not camera_reader.available:
         logger.warning("camera reader unavailable: %s", camera_reader.error or "unknown_error")
 
     app = web.Application()
     app[CAMERA_READER_APP_KEY] = camera_reader
+    app[AUDIO_RECORDER_APP_KEY] = audio_recorder
     app.router.add_get(VIDEO_STREAM_PATH, camera_stream)
+    app.router.add_get(AUDIO_STREAM_PATH, audio_stream)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -114,18 +162,24 @@ async def serve_video_server() -> None:
     )
 
     logger.info(
-        "starting video server on http://%s:%s%s",
+        "starting video server on http://%s:%s%s and http://%s:%s%s",
         VIDEO_STREAM_HOST,
         VIDEO_STREAM_PORT,
         VIDEO_STREAM_PATH,
+        VIDEO_STREAM_HOST,
+        VIDEO_STREAM_PORT,
+        AUDIO_STREAM_PATH,
     )
     camera_reader.start()
     await site.start()
     logger.info(
-        "video server listening on http://%s:%s%s",
+        "video server listening on http://%s:%s%s and http://%s:%s%s",
         VIDEO_STREAM_HOST,
         VIDEO_STREAM_PORT,
         VIDEO_STREAM_PATH,
+        VIDEO_STREAM_HOST,
+        VIDEO_STREAM_PORT,
+        AUDIO_STREAM_PATH,
     )
 
     try:

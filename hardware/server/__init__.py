@@ -4,7 +4,7 @@ import logging
 
 from calibration import load_calibration_set
 from logging_config import setup_logging
-from .audio import serve_audio_recorder
+from .audio import WavAudioRecorder, serve_audio_recorder
 from .video import serve_video_server
 from .websocket import serve_websocket_server
 
@@ -24,10 +24,11 @@ async def run_service(name: str, task: asyncio.Task[None]) -> None:
 async def main() -> None:
     setup_logging()
     calibration_set = load_calibration_set()
+    audio_recorder = WavAudioRecorder()
     services = {
-        "audio": asyncio.create_task(serve_audio_recorder()),
+        "audio": asyncio.create_task(serve_audio_recorder(audio_recorder)),
         "websocket": asyncio.create_task(serve_websocket_server(calibration_set)),
-        "video": asyncio.create_task(serve_video_server()),
+        "video": asyncio.create_task(serve_video_server(audio_recorder)),
     }
     monitor_tasks = {
         asyncio.create_task(run_service(name, task)): name for name, task in services.items()
