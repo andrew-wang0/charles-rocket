@@ -34,7 +34,7 @@ export function ControlShutoffAll({ className, ...props }: Props) {
     <WidgetLockableButton
       disabled={isDisabled}
       className={cn(
-        "hover:bg-destructive/20 hover:text-destructive h-auto self-stretch px-1 py-3 [text-orientation:mixed] [writing-mode:vertical-rl]",
+        "enabled:hover:bg-destructive/20 enabled:hover:text-destructive h-auto self-stretch px-1 py-3 [text-orientation:mixed] [writing-mode:vertical-rl]",
         className,
       )}
       onClick={() => {

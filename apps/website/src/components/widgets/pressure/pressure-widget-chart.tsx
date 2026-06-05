@@ -102,7 +102,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
         accessibilityLayer
         data={visibleChartData}
         margin={{
-          left: 4,
+          left: 12,
           right: 10,
         }}
       >
@@ -116,7 +116,7 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
             pressureAxisTicks[0] ?? 0,
             pressureAxisTicks.at(-1) ?? MIN_PRESSURE_AXIS_RANGE_PSI,
           ]}
-          width={52}
+          width={64}
           tickFormatter={(value) => formatAxisTick(Number(value))}
         />
         <XAxis

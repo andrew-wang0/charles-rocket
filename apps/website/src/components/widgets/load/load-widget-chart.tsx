@@ -50,7 +50,7 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
         accessibilityLayer
         data={visibleChartData}
         margin={{
-          left: 4,
+          left: 12,
           right: 10,
         }}
       >
@@ -59,7 +59,7 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
           axisLine={false}
           tickLine={false}
           tickMargin={6}
-          width={52}
+          width={64}
           tickFormatter={(value) => formatAxisTick(Number(value))}
         />
         <XAxis
