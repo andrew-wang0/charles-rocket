@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { useWidgetLock } from "@/components/widgets/widget-lock";
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { useServo, useServoControl } from "@/hooks/use-servo";
 import { cn } from "@/lib/util/cn";
@@ -78,10 +79,19 @@ function ControlAdditionalServoButton({ index, label }: ControlAdditionalServoBu
 }
 
 export function ControlAdditionalControls() {
+  const { locked } = useWidgetLock();
+
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button aria-label="Open additional controls" size="xs" type="button" variant="secondary">
+        <Button
+          aria-label="Open additional controls"
+          className="disabled:hover:bg-secondary disabled:hover:text-secondary-foreground"
+          disabled={locked}
+          size="xs"
+          type="button"
+          variant="secondary"
+        >
           <ListPlusIcon />
         </Button>
       </DialogTrigger>
