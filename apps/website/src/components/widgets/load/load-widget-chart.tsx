@@ -41,6 +41,18 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
     [chartWindowMs, latestTime, windowStart],
   );
 
+  const yDomain = React.useMemo(() => {
+    const loads = visibleChartData.map((p) => p.load).filter((v): v is number => v !== null);
+    if (loads.length === 0) return ["auto", "auto"] as const;
+    const minLoad = Math.min(...loads);
+    const maxLoad = Math.max(...loads);
+    if (maxLoad - minLoad < 4) {
+      const center = (minLoad + maxLoad) / 2;
+      return [center - 2, center + 2];
+    }
+    return [minLoad, maxLoad];
+  }, [visibleChartData]);
+
   return (
     <ChartContainer
       config={loadChartConfig}
@@ -60,6 +72,7 @@ export const LoadWidgetChart = React.memo(function LoadWidgetChart() {
           tickLine={false}
           tickMargin={6}
           width={64}
+          domain={yDomain}
           tickFormatter={(value) => formatAxisTick(Number(value))}
         />
         <XAxis

@@ -24,6 +24,8 @@ from config import (
 
 logger = logging.getLogger(__name__)
 MAX_CONSECUTIVE_READ_FAILURES = 5
+OUTLIER_JUMP_LB = 15
+OUTLIER_CONFIRM_LB = 5
 CONSECUTIVE_READ_FAILURE_WARNING_THRESHOLD = 3
 THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 HX711_CLOCK_HIGH_TIMEOUT_SECONDS = 0.00006
@@ -172,6 +174,7 @@ class LoadSampler:
         self._data_file: TextIO | None = None
         self._data_file_bucket: int | None = None
         self._last_pruned_bucket: int | None = None
+        self._pending_sample: tuple[int, float] | None = None
         self._reference_unit = calibration.reference_unit if calibration else LOAD_CELL_REFERENCE_UNIT
         self._zero = calibration.zero if calibration else LOAD_CELL_OFFSET
 
@@ -502,7 +505,21 @@ class LoadSampler:
                 timestamp_ms = int(time.time() * 1000)
                 pounds = self._read_weight()
                 self._consecutive_failures = 0
-                self._record_sample(timestamp_ms, pounds)
+
+                with self._lock:
+                    last_pounds = self._buffer[-1][1] if self._buffer else None
+
+                jump = abs(pounds - last_pounds) if last_pounds is not None else 0
+
+                if self._pending_sample is not None and jump > OUTLIER_CONFIRM_LB:
+                    self._record_sample(*self._pending_sample)
+                    self._pending_sample = None
+                    self._record_sample(timestamp_ms, pounds)
+                elif jump > OUTLIER_JUMP_LB:
+                    self._pending_sample = (timestamp_ms, pounds)
+                else:
+                    self._pending_sample = None
+                    self._record_sample(timestamp_ms, pounds)
             except Exception as exc:
                 self._consecutive_failures += 1
                 read_failures_are_degraded = (
