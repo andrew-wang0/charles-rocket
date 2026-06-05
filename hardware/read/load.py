@@ -27,10 +27,132 @@ MAX_CONSECUTIVE_READ_FAILURES = 5
 CONSECUTIVE_READ_FAILURE_WARNING_THRESHOLD = 3
 THREAD_JOIN_TIMEOUT_SECONDS = 0.2
 HX711_CLOCK_HIGH_TIMEOUT_SECONDS = 0.00006
-HX711_READ_MAX_TRIES = 12
+HX711_READY_TIMEOUT_SECONDS = 0.25
+HX711_READY_POLL_SECONDS = 0.0005
 HX711_READ_ATTEMPT_MULTIPLIER = 4
 HISTORY_FILE_BUCKET_MS = 60 * 60 * 1000
 DEFAULT_HISTORY_MAX_POINTS = 1_200
+HX711_GAIN_PULSES = {
+    128: 1,
+    32: 2,
+    64: 3,
+}
+
+
+class HX711ReadError(RuntimeError):
+    pass
+
+
+class HX711Reader:
+    def __init__(
+        self,
+        gpio: Any,
+        dout_pin: int,
+        pd_sck_pin: int,
+        gain: int = 128,
+    ) -> None:
+        if gain not in HX711_GAIN_PULSES:
+            raise ValueError(f"unsupported HX711 gain: {gain}")
+
+        self._gpio = gpio
+        self._dout = dout_pin
+        self._pd_sck = pd_sck_pin
+        self._gain = gain
+        self._gain_pulses = HX711_GAIN_PULSES[gain]
+
+        self._gpio.setwarnings(False)
+        self._gpio.setmode(self._gpio.BCM)
+        self._gpio.setup(self._dout, self._gpio.IN)
+        self._gpio.setup(self._pd_sck, self._gpio.OUT)
+        self._gpio.output(self._pd_sck, False)
+
+    def reset(self) -> None:
+        self.power_down()
+        self.power_up()
+
+    def power_down(self) -> None:
+        self._gpio.output(self._pd_sck, False)
+        self._gpio.output(self._pd_sck, True)
+        time.sleep(0.00008)
+
+    def power_up(self) -> None:
+        self._gpio.output(self._pd_sck, False)
+        time.sleep(0.00008)
+
+    def get_raw_data(self, times: int = 1) -> list[int]:
+        if times < 1:
+            raise ValueError("times must be greater than zero")
+
+        data_list: list[int] = []
+        max_attempts = max(times * HX711_READ_ATTEMPT_MULTIPLIER, times)
+        attempts = 0
+
+        while len(data_list) < times and attempts < max_attempts:
+            attempts += 1
+            try:
+                data_list.append(self._read())
+            except HX711ReadError:
+                if attempts >= max_attempts:
+                    raise
+
+        if len(data_list) < times:
+            raise HX711ReadError(
+                f"hx711_read_timeout:received={len(data_list)} expected={times} "
+                f"attempts={attempts}"
+            )
+
+        return data_list
+
+    def _read(self) -> int:
+        self._wait_ready()
+
+        value = 0
+        for _ in range(24):
+            value = (value << 1) | self._read_bit()
+
+        self._set_gain_for_next_read()
+
+        if value & 0x800000:
+            value -= 0x1000000
+
+        return value
+
+    def _wait_ready(self) -> None:
+        deadline = time.perf_counter() + HX711_READY_TIMEOUT_SECONDS
+
+        while self._gpio.input(self._dout):
+            if time.perf_counter() >= deadline:
+                raise HX711ReadError(
+                    "hx711_read_timeout:"
+                    f"ready_wait_exceeded={HX711_READY_TIMEOUT_SECONDS}s"
+                )
+
+            time.sleep(HX711_READY_POLL_SECONDS)
+
+    def _read_bit(self) -> int:
+        self._gpio.output(self._pd_sck, True)
+        start_counter = time.perf_counter()
+        try:
+            bit = int(bool(self._gpio.input(self._dout)))
+            return bit
+        finally:
+            self._gpio.output(self._pd_sck, False)
+            self._check_clock_high_time(start_counter)
+
+    def _set_gain_for_next_read(self) -> None:
+        for _ in range(self._gain_pulses):
+            self._pulse_clock()
+
+    def _pulse_clock(self) -> None:
+        self._gpio.output(self._pd_sck, True)
+        start_counter = time.perf_counter()
+        self._gpio.output(self._pd_sck, False)
+        self._check_clock_high_time(start_counter)
+
+    def _check_clock_high_time(self, start_counter: float) -> None:
+        time_elapsed = time.perf_counter() - start_counter
+        if time_elapsed >= HX711_CLOCK_HIGH_TIMEOUT_SECONDS:
+            raise HX711ReadError("hx711_clock_high_timeout:{:0.8f}".format(time_elapsed))
 
 
 class LoadSampler:
@@ -54,15 +176,13 @@ class LoadSampler:
         self._zero = calibration.zero if calibration else LOAD_CELL_OFFSET
 
         try:
-            hx711_module = importlib.import_module("hx711")
             self._gpio = importlib.import_module("RPi.GPIO")
-            self._hx = self._create_safe_hx711(hx711_module)(
+            self._hx = HX711Reader(
+                gpio=self._gpio,
                 dout_pin=LOAD_CELL_DATA_PIN,
                 pd_sck_pin=LOAD_CELL_CLOCK_PIN,
-                channel="A",
                 gain=128,
             )
-            self._hx.min_measures = 1
             self._hx.reset()
 
             self.available = True
@@ -76,75 +196,21 @@ class LoadSampler:
         except Exception as exc:
             self.error = self._format_init_error(exc)
 
-    def _create_safe_hx711(self, hx711_module: Any) -> type[Any]:
-        gpio = hx711_module.GPIO
-        generic_error = getattr(hx711_module, "GenericHX711Exception", RuntimeError)
-
-        class SafeHX711(hx711_module.HX711):
-            def _set_channel_gain(self, num: int) -> bool:
-                if not 1 <= num <= 3:
-                    raise AttributeError('"num" has to be in the range of 1 to 3')
-
-                for _ in range(num):
-                    start_counter = time.perf_counter()
-                    gpio.output(self._pd_sck, True)
-                    gpio.output(self._pd_sck, False)
-                    time_elapsed = time.perf_counter() - start_counter
-
-                    if time_elapsed >= HX711_CLOCK_HIGH_TIMEOUT_SECONDS:
-                        raise generic_error(
-                            "hx711_gain_set_timeout:{:0.8f}".format(time_elapsed)
-                        )
-
-                return True
-
-            def get_raw_data(self, times: int = 5) -> list[int]:
-                self._validate_measure_count(times)
-
-                data_list: list[int] = []
-                max_attempts = max(times * HX711_READ_ATTEMPT_MULTIPLIER, times)
-                attempts = 0
-
-                while len(data_list) < times and attempts < max_attempts:
-                    attempts += 1
-                    data = self._read(max_tries=HX711_READ_MAX_TRIES)
-                    if data not in [False, -1]:
-                        data_list.append(data)
-
-                if len(data_list) < times:
-                    raise generic_error(
-                        f"hx711_read_timeout:received={len(data_list)} expected={times} "
-                        f"attempts={attempts}"
-                    )
-
-                return data_list
-
-        return SafeHX711
-
     def _format_init_error(self, exc: Exception) -> str:
-        if isinstance(exc, RecursionError):
-            return (
-                "HX711 initialization failed: reset hit Python recursion depth, "
-                "usually due to unstable timing while setting gain/channel"
-            )
-
         message = self._format_hx711_error(exc)
         if message is not None:
             return f"HX711 initialization failed: {message}"
 
         if isinstance(exc, (ImportError, ModuleNotFoundError, OSError)):
-            return (
-                f"{exc}. Install `hx711` and ensure `rpi-lgpio` is installed "
-                "in the hardware virtualenv."
-            )
+            return f"{exc}. Ensure `rpi-lgpio` is installed in the hardware virtualenv."
 
         return str(exc)
 
     def _format_hx711_error(self, exc: Exception) -> str | None:
         message = str(exc)
-        if message.startswith("hx711_gain_set_timeout:"):
+        if message.startswith("hx711_clock_high_timeout:"):
             elapsed = message.partition(":")[2] or "unknown"
-            return f"setting gain/channel exceeded 60us (elapsed={elapsed}s)"
+            return f"HX711 clock stayed high longer than 60us (elapsed={elapsed}s)"
 
         if message.startswith("hx711_read_timeout:"):
             return "timed out waiting for valid samples"

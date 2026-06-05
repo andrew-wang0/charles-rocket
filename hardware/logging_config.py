@@ -5,32 +5,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-HX711_TIMING_WARNING_PREFIX = "setting gain and channel took more than 60µs."
 DEFAULT_ACTION_LOG_PATH = Path(__file__).resolve().parent / "data" / "hardware-actions.log"
 
 _configured = False
-
-
-class SuppressRepeatedHx711WarningFilter(logging.Filter):
-    def __init__(self) -> None:
-        super().__init__()
-        self._has_emitted = False
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if record.levelno != logging.WARNING:
-            return True
-
-        message = record.getMessage()
-        if not message.startswith(HX711_TIMING_WARNING_PREFIX):
-            return True
-
-        if self._has_emitted:
-            return False
-
-        self._has_emitted = True
-        record.msg = "HX711 timing warning (future repeats suppressed): %s"
-        record.args = (message,)
-        return True
 
 
 class PrettyColorFormatter(logging.Formatter):
@@ -105,7 +82,6 @@ def setup_logging(level: int = logging.INFO) -> None:
         return
 
     console_handler = logging.StreamHandler()
-    console_handler.addFilter(SuppressRepeatedHx711WarningFilter())
 
     if should_use_color(console_handler.stream):
         console_handler.setFormatter(PrettyColorFormatter())

@@ -4,6 +4,5 @@ adafruit-circuitpython-ads1x15
 adafruit-circuitpython-motor
 adafruit-circuitpython-pca9685
 rpi-lgpio
-hx711
 websockets
 opencv-python

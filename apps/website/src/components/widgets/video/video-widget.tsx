@@ -16,6 +16,7 @@ const STREAM_RETRY_MS = 2_000;
 export function VideoWidget() {
   const [attempt, setAttempt] = React.useState(0);
   const [audioMuted, setAudioMuted] = React.useState(true);
+  const [audioUnavailable, setAudioUnavailable] = React.useState(false);
   const audioRef = React.useRef<HTMLAudioElement>(null);
   const status = useConnectionStatus();
   const connectionGeneration = useConnectionGeneration();
@@ -60,36 +61,51 @@ export function VideoWidget() {
     };
   }, [hasSignal, status]);
 
+  React.useEffect(() => {
+    if (audioMuted) return;
+
+    const audio = audioRef.current;
+    if (audio === null) return;
+
+    audio.muted = false;
+    void audio.play().catch(() => {
+      setAudioMuted(true);
+      setAudioUnavailable(true);
+      audio.muted = true;
+    });
+  }, [audioMuted]);
+
   const toggleAudio = () => {
     const nextMuted = !audioMuted;
     setAudioMuted(nextMuted);
+    setAudioUnavailable(false);
 
     const audio = audioRef.current;
     if (audio === null) return;
 
     audio.muted = nextMuted;
-    if (!nextMuted) {
-      void audio.play().catch(() => {
-        setAudioMuted(true);
-        audio.muted = true;
-      });
+    if (nextMuted) {
+      audio.pause();
     }
   };
+
+  const audioButtonLabel = audioUnavailable ? "Audio unavailable" : audioMuted ? "Unmute" : "Mute";
 
   return (
     <WidgetCard size="sm">
       <CardHeader className="flex items-center justify-between">
         <CardTitle>Video Feed</CardTitle>
         <Button
-          aria-label={audioMuted ? "Unmute audio" : "Mute audio"}
+          aria-label={audioButtonLabel}
           disabled={status !== ConnectionStatus.CONNECTED}
           onClick={toggleAudio}
-          size="icon-xs"
-          title={audioMuted ? "Unmute audio" : "Mute audio"}
+          size="xs"
+          title={audioButtonLabel}
           type="button"
           variant="outline"
         >
           {audioMuted ? <SpeakerSlashIcon /> : <SpeakerHighIcon />}
+          {audioButtonLabel}
         </Button>
       </CardHeader>
       <CardContent className="flex min-h-0 flex-1">
@@ -114,14 +130,17 @@ export function VideoWidget() {
             src={streamUrl}
           />
           <audio
-            autoPlay
             className="hidden"
             muted={audioMuted}
+            onCanPlay={() => {
+              setAudioUnavailable(false);
+            }}
             onError={() => {
               setAudioMuted(true);
+              setAudioUnavailable(true);
             }}
             ref={audioRef}
-            src={audioUrl}
+            src={audioMuted ? undefined : audioUrl}
           />
           {!hasSignal ? (
             <div className="bg-muted text-muted-foreground absolute border p-2 text-sm">
