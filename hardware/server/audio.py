@@ -23,10 +23,11 @@ logger = logging.getLogger(__name__)
 AUDIO_SHUTDOWN_TIMEOUT_SECONDS = 1.0
 AUDIO_DEVICE_BUSY_RETRY_COUNT = 8
 AUDIO_DEVICE_BUSY_RETRY_SECONDS = 0.25
-AUDIO_STREAM_QUEUE_CHUNKS = 200
-AUDIO_READ_INTERVAL_SECONDS = 0.1
+AUDIO_STREAM_QUEUE_CHUNKS = 20
+AUDIO_READ_INTERVAL_SECONDS = 0.02
 AUDIO_DEVICE_UNAVAILABLE_RETRY_SECONDS = 5.0
 AUDIO_DEVICE_LIST_TIMEOUT_SECONDS = 2.0
+AUDIO_AVAILABLE_STALE_SECONDS = 2.0
 ARECORD_DEVICE_PATTERN = re.compile(r"card\s+(\d+):.*device\s+(\d+):")
 
 
@@ -47,6 +48,8 @@ class WavAudioRecorder:
         self._wave_writer: wave.Wave_write | None = None
         self._chunk_started_ms = 0
         self._active_device = AUDIO_RECORD_DEVICE
+        self._last_chunk_time = 0.0
+        self._last_error: str | None = None
         self._bytes_per_sample = self._sample_width_bytes()
         self._read_size = max(
             self._bytes_per_sample * AUDIO_RECORD_CHANNELS,
@@ -86,15 +89,19 @@ class WavAudioRecorder:
                 self._close_chunk()
                 raise
             except FileNotFoundError:
-                logger.error("audio recording unavailable: `arecord` command not found")
+                self._last_error = "`arecord` command not found"
+                logger.error("audio recording unavailable: %s", self._last_error)
                 await asyncio.sleep(5)
             except AudioDeviceBusyError as exc:
+                self._last_error = str(exc)
                 logger.warning("audio recording skipped because device stayed busy: %s", exc)
                 await asyncio.sleep(1)
             except AudioDeviceUnavailableError as exc:
+                self._last_error = str(exc)
                 logger.warning("audio recording unavailable: %s", exc)
                 await asyncio.sleep(AUDIO_DEVICE_UNAVAILABLE_RETRY_SECONDS)
             except Exception:
+                self._last_error = "audio recording stream failed"
                 logger.exception("audio recording stream failed")
                 await asyncio.sleep(1)
 
@@ -128,6 +135,23 @@ class WavAudioRecorder:
             + b"data"
             + (0xFFFFFFFF).to_bytes(4, "little")
         )
+
+    def status_payload(self) -> dict[str, bool | int | str | None]:
+        now = time.monotonic()
+        available = (
+            self._process is not None
+            and self._last_chunk_time > 0
+            and now - self._last_chunk_time <= AUDIO_AVAILABLE_STALE_SECONDS
+        )
+
+        return {
+            "available": available,
+            "device": self._active_device if available else None,
+            "sampleRate": AUDIO_RECORD_SAMPLE_RATE,
+            "channels": AUDIO_RECORD_CHANNELS,
+            "sampleFormat": AUDIO_RECORD_SAMPLE_FORMAT,
+            "lastError": None if available else self._last_error,
+        }
 
     def _sample_width_bytes(self) -> int:
         if AUDIO_RECORD_SAMPLE_FORMAT != "S16_LE":
@@ -233,6 +257,8 @@ class WavAudioRecorder:
                     break
 
                 timestamp_ms = int(time.time() * 1000)
+                self._last_chunk_time = time.monotonic()
+                self._last_error = None
                 self._record_chunk(chunk, timestamp_ms)
                 self._broadcast(chunk)
         except asyncio.CancelledError:
@@ -293,16 +319,18 @@ class WavAudioRecorder:
         self._file_handle = None
 
     def _broadcast(self, chunk: bytes) -> None:
-        stale_clients: list[asyncio.Queue[bytes]] = []
-
         for queue in self._clients:
             try:
                 queue.put_nowait(chunk)
             except asyncio.QueueFull:
-                stale_clients.append(queue)
+                self._drop_queued_audio(queue)
+                with contextlib.suppress(asyncio.QueueFull):
+                    queue.put_nowait(chunk)
 
-        for queue in stale_clients:
-            self.unsubscribe(queue)
+    def _drop_queued_audio(self, queue: asyncio.Queue[bytes]) -> None:
+        while not queue.empty():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queue.get_nowait()
 
     def _is_device_busy_message(self, message: str) -> bool:
         return "Device or resource busy" in message

@@ -8,7 +8,9 @@ from typing import cast
 from aiohttp import web
 
 from config import (
+    AUDIO_STATUS_PATH,
     AUDIO_STREAM_PATH,
+    AUDIO_STREAM_WS_PATH,
     VIDEO_STREAM_FPS,
     VIDEO_STREAM_HOST,
     VIDEO_STREAM_PATH,
@@ -141,6 +143,37 @@ async def audio_stream(request: web.Request) -> web.StreamResponse:
     return response
 
 
+async def audio_status(request: web.Request) -> web.Response:
+    audio_recorder = get_audio_recorder(request)
+    return web.json_response(audio_recorder.status_payload())
+
+
+async def audio_pcm_stream(request: web.Request) -> web.WebSocketResponse:
+    audio_recorder = get_audio_recorder(request)
+    queue = audio_recorder.subscribe()
+    websocket = web.WebSocketResponse(heartbeat=10.0)
+    await websocket.prepare(request)
+
+    try:
+        await websocket.send_json(audio_recorder.status_payload())
+
+        while True:
+            chunk = await queue.get()
+            await websocket.send_bytes(chunk)
+    except asyncio.CancelledError:
+        raise
+    except (ConnectionError, ConnectionResetError, BrokenPipeError):
+        pass
+    except Exception:
+        logger.exception("audio websocket stream failed")
+    finally:
+        audio_recorder.unsubscribe(queue)
+        with contextlib.suppress(Exception):
+            await websocket.close()
+
+    return websocket
+
+
 async def serve_video_server(audio_recorder: WavAudioRecorder) -> None:
     camera_reader = CameraReader()
     if not camera_reader.available:
@@ -151,6 +184,8 @@ async def serve_video_server(audio_recorder: WavAudioRecorder) -> None:
     app[AUDIO_RECORDER_APP_KEY] = audio_recorder
     app.router.add_get(VIDEO_STREAM_PATH, camera_stream)
     app.router.add_get(AUDIO_STREAM_PATH, audio_stream)
+    app.router.add_get(AUDIO_STREAM_WS_PATH, audio_pcm_stream)
+    app.router.add_get(AUDIO_STATUS_PATH, audio_status)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -162,24 +197,30 @@ async def serve_video_server(audio_recorder: WavAudioRecorder) -> None:
     )
 
     logger.info(
-        "starting video server on http://%s:%s%s and http://%s:%s%s",
+        "starting video server on http://%s:%s%s, http://%s:%s%s, and ws://%s:%s%s",
         VIDEO_STREAM_HOST,
         VIDEO_STREAM_PORT,
         VIDEO_STREAM_PATH,
         VIDEO_STREAM_HOST,
         VIDEO_STREAM_PORT,
         AUDIO_STREAM_PATH,
+        VIDEO_STREAM_HOST,
+        VIDEO_STREAM_PORT,
+        AUDIO_STREAM_WS_PATH,
     )
     camera_reader.start()
     await site.start()
     logger.info(
-        "video server listening on http://%s:%s%s and http://%s:%s%s",
+        "video server listening on http://%s:%s%s, http://%s:%s%s, and ws://%s:%s%s",
         VIDEO_STREAM_HOST,
         VIDEO_STREAM_PORT,
         VIDEO_STREAM_PATH,
         VIDEO_STREAM_HOST,
         VIDEO_STREAM_PORT,
         AUDIO_STREAM_PATH,
+        VIDEO_STREAM_HOST,
+        VIDEO_STREAM_PORT,
+        AUDIO_STREAM_WS_PATH,
     )
 
     try:

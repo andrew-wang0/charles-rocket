@@ -12,12 +12,19 @@ import { useConnectionGeneration, useConnectionStatus } from "@/hooks/use-connec
 import { cn } from "@/lib/util/cn";
 
 const STREAM_RETRY_MS = 2_000;
+const AUDIO_STATUS_POLL_MS = 2_000;
+const AUDIO_START_DELAY_SECONDS = 0.06;
+const AUDIO_MAX_BUFFER_SECONDS = 0.35;
+const PCM_SAMPLE_RATE = 48_000;
+const PCM_CHANNELS = 1;
 
 export function VideoWidget() {
   const [attempt, setAttempt] = React.useState(0);
   const [audioMuted, setAudioMuted] = React.useState(true);
-  const [audioUnavailable, setAudioUnavailable] = React.useState(false);
-  const audioRef = React.useRef<HTMLAudioElement>(null);
+  const [audioAvailable, setAudioAvailable] = React.useState(false);
+  const audioContextRef = React.useRef<AudioContext | null>(null);
+  const audioSocketRef = React.useRef<WebSocket | null>(null);
+  const nextAudioTimeRef = React.useRef(0);
   const status = useConnectionStatus();
   const connectionGeneration = useConnectionGeneration();
   const [loadedStreamKey, setLoadedStreamKey] = React.useState<string | null>(null);
@@ -37,8 +44,9 @@ export function VideoWidget() {
     return url.toString();
   }, [attempt, connectionGeneration]);
 
-  const audioUrl = React.useMemo(() => {
+  const audioStatusUrl = React.useMemo(() => {
     const url = new URL(env.NEXT_PUBLIC_AUDIO_URL);
+    url.pathname = "/audio/status";
     if (url.protocol === "ws:") {
       url.protocol = "http:";
     } else if (url.protocol === "wss:") {
@@ -48,6 +56,54 @@ export function VideoWidget() {
     url.searchParams.set("connection", String(connectionGeneration));
     return url.toString();
   }, [connectionGeneration]);
+
+  const audioSocketUrl = React.useMemo(() => {
+    const url = new URL(env.NEXT_PUBLIC_AUDIO_URL);
+    url.pathname = "/audio.raw";
+    if (url.protocol === "http:") {
+      url.protocol = "ws:";
+    } else if (url.protocol === "https:") {
+      url.protocol = "wss:";
+    }
+
+    url.searchParams.set("connection", String(connectionGeneration));
+    return url.toString();
+  }, [connectionGeneration]);
+
+  const getAudioContext = () => {
+    if (audioContextRef.current === null) {
+      audioContextRef.current = new AudioContext({ latencyHint: "interactive" });
+    }
+
+    return audioContextRef.current;
+  };
+
+  const schedulePcmChunk = (audioContext: AudioContext, chunk: ArrayBuffer) => {
+    const samples = new Int16Array(chunk);
+    const frameCount = Math.floor(samples.length / PCM_CHANNELS);
+    if (frameCount <= 0) return;
+
+    const buffer = audioContext.createBuffer(PCM_CHANNELS, frameCount, PCM_SAMPLE_RATE);
+    const channel = buffer.getChannelData(0);
+
+    for (let index = 0; index < frameCount; index += 1) {
+      channel[index] = samples[index] / 32768;
+    }
+
+    const now = audioContext.currentTime;
+    if (
+      nextAudioTimeRef.current < now + AUDIO_START_DELAY_SECONDS ||
+      nextAudioTimeRef.current > now + AUDIO_MAX_BUFFER_SECONDS
+    ) {
+      nextAudioTimeRef.current = now + AUDIO_START_DELAY_SECONDS;
+    }
+
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioContext.destination);
+    source.start(nextAudioTimeRef.current);
+    nextAudioTimeRef.current += buffer.duration;
+  };
 
   React.useEffect(() => {
     if (hasSignal || status !== ConnectionStatus.CONNECTED) return;
@@ -62,34 +118,105 @@ export function VideoWidget() {
   }, [hasSignal, status]);
 
   React.useEffect(() => {
-    if (audioMuted) return;
+    if (status !== ConnectionStatus.CONNECTED) {
+      return;
+    }
 
-    const audio = audioRef.current;
-    if (audio === null) return;
+    let ignore = false;
+    const updateAudioStatus = async () => {
+      try {
+        const response = await fetch(audioStatusUrl, { cache: "no-store" });
+        if (!response.ok) throw new Error(`audio_status_${response.status}`);
 
-    audio.muted = false;
-    void audio.play().catch(() => {
+        const payload = (await response.json()) as { available?: unknown };
+        if (ignore) return;
+
+        const nextAudioAvailable = payload.available === true;
+        setAudioAvailable(nextAudioAvailable);
+        if (!nextAudioAvailable) {
+          setAudioMuted(true);
+        }
+      } catch {
+        if (ignore) return;
+        setAudioAvailable(false);
+        setAudioMuted(true);
+      }
+    };
+
+    void updateAudioStatus();
+    const interval = window.setInterval(() => {
+      void updateAudioStatus();
+    }, AUDIO_STATUS_POLL_MS);
+
+    return () => {
+      ignore = true;
+      window.clearInterval(interval);
+    };
+  }, [audioStatusUrl, status]);
+
+  React.useEffect(() => {
+    if (audioMuted || !audioAvailable || status !== ConnectionStatus.CONNECTED) {
+      audioSocketRef.current?.close();
+      audioSocketRef.current = null;
+      return;
+    }
+
+    const audioContext = audioContextRef.current;
+    if (audioContext === null) {
       setAudioMuted(true);
-      setAudioUnavailable(true);
-      audio.muted = true;
-    });
-  }, [audioMuted]);
+      return;
+    }
+
+    let ignore = false;
+    const socket = new WebSocket(audioSocketUrl);
+    socket.binaryType = "arraybuffer";
+    audioSocketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      if (ignore || !(event.data instanceof ArrayBuffer)) return;
+      schedulePcmChunk(audioContext, event.data);
+    };
+
+    socket.onerror = () => {
+      if (ignore) return;
+      setAudioMuted(true);
+      setAudioAvailable(false);
+    };
+
+    socket.onclose = () => {
+      if (ignore) return;
+      setAudioMuted(true);
+    };
+
+    return () => {
+      ignore = true;
+      socket.close();
+      if (audioSocketRef.current === socket) {
+        audioSocketRef.current = null;
+      }
+    };
+  }, [audioAvailable, audioMuted, audioSocketUrl, status]);
 
   const toggleAudio = () => {
+    if (!audioAvailable) return;
+
     const nextMuted = !audioMuted;
     setAudioMuted(nextMuted);
-    setAudioUnavailable(false);
 
-    const audio = audioRef.current;
-    if (audio === null) return;
+    if (!nextMuted) {
+      const audioContext = getAudioContext();
+      nextAudioTimeRef.current = 0;
 
-    audio.muted = nextMuted;
-    if (nextMuted) {
-      audio.pause();
+      void audioContext.resume().catch(() => {
+        setAudioMuted(true);
+      });
+    } else {
+      audioSocketRef.current?.close();
+      audioSocketRef.current = null;
     }
   };
 
-  const audioButtonLabel = audioUnavailable ? "Audio unavailable" : audioMuted ? "Unmute" : "Mute";
+  const audioButtonLabel = !audioAvailable ? "Audio unavailable" : audioMuted ? "Unmute" : "Mute";
 
   return (
     <WidgetCard size="sm">
@@ -97,7 +224,7 @@ export function VideoWidget() {
         <CardTitle>Video Feed</CardTitle>
         <Button
           aria-label={audioButtonLabel}
-          disabled={status !== ConnectionStatus.CONNECTED}
+          disabled={status !== ConnectionStatus.CONNECTED || !audioAvailable}
           onClick={toggleAudio}
           size="xs"
           title={audioButtonLabel}
@@ -128,19 +255,6 @@ export function VideoWidget() {
               setLoadedStreamKey(streamKey);
             }}
             src={streamUrl}
-          />
-          <audio
-            className="hidden"
-            muted={audioMuted}
-            onCanPlay={() => {
-              setAudioUnavailable(false);
-            }}
-            onError={() => {
-              setAudioMuted(true);
-              setAudioUnavailable(true);
-            }}
-            ref={audioRef}
-            src={audioMuted ? undefined : audioUrl}
           />
           {!hasSignal ? (
             <div className="bg-muted text-muted-foreground absolute border p-2 text-sm">
