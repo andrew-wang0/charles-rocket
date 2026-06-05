@@ -28,6 +28,16 @@ VIDEO_SHUTDOWN_TIMEOUT_SECONDS = 0.1
 INITIAL_FRAME_TIMEOUT_SECONDS = 1.0
 
 
+def stream_headers(content_type: str) -> dict[str, str]:
+    return {
+        "Content-Type": content_type,
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Connection": "close",
+        "Access-Control-Allow-Origin": "*",
+    }
+
+
 def get_camera_reader(request: web.Request) -> CameraReader:
     return cast(CameraReader, request.app[CAMERA_READER_APP_KEY])
 
@@ -57,12 +67,7 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
 
     response = web.StreamResponse(
         status=200,
-        headers={
-            "Content-Type": f"multipart/x-mixed-replace; boundary={BOUNDARY}",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Connection": "close",
-        },
+        headers=stream_headers(f"multipart/x-mixed-replace; boundary={BOUNDARY}"),
     )
     await response.prepare(request)
 
@@ -114,12 +119,7 @@ async def audio_stream(request: web.Request) -> web.StreamResponse:
     queue = audio_recorder.subscribe()
     response = web.StreamResponse(
         status=200,
-        headers={
-            "Content-Type": "audio/wav",
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Connection": "close",
-        },
+        headers=stream_headers("audio/wav"),
     )
     await response.prepare(request)
 
@@ -145,7 +145,10 @@ async def audio_stream(request: web.Request) -> web.StreamResponse:
 
 async def audio_status(request: web.Request) -> web.Response:
     audio_recorder = get_audio_recorder(request)
-    return web.json_response(audio_recorder.status_payload())
+    return web.json_response(
+        audio_recorder.status_payload(),
+        headers=stream_headers("application/json"),
+    )
 
 
 async def audio_pcm_stream(request: web.Request) -> web.WebSocketResponse:
