@@ -7,7 +7,7 @@ import { ConnectionStatus } from "@/client";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WidgetCard } from "@/components/widgets/widget-card";
-import { env } from "@/env";
+import { hardwareAudioStreamUrl, hardwareVideoUrl } from "@/env";
 import { useConnectionGeneration, useConnectionStatus } from "@/hooks/use-connection-status";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/util/cn";
@@ -32,7 +32,7 @@ export function VideoWidget() {
   const hasSignal = loadedStreamKey === streamKey;
 
   const streamUrl = React.useMemo(() => {
-    const url = new URL(env.NEXT_PUBLIC_VIDEO_URL);
+    const url = new URL(hardwareVideoUrl());
     if (url.protocol === "ws:") {
       url.protocol = "http:";
     } else if (url.protocol === "wss:") {
@@ -45,7 +45,7 @@ export function VideoWidget() {
   }, [attempt, connectionGeneration]);
 
   const audioSocketUrl = React.useMemo(() => {
-    const url = new URL(env.NEXT_PUBLIC_AUDIO_STREAM_URL);
+    const url = new URL(hardwareAudioStreamUrl());
     if (url.protocol === "http:") {
       url.protocol = "ws:";
     } else if (url.protocol === "https:") {

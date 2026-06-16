@@ -15,7 +15,7 @@ import {
   servoSnapshot,
   servoStateNotification,
 } from "@/client/router/control/servo";
-import { env } from "@/env";
+import { hardwareWsUrl } from "@/env";
 import { useStore } from "@/lib/store";
 
 export enum ConnectionStatus {
@@ -184,7 +184,7 @@ export function connect() {
 
   setState({ status: ConnectionStatus.CONNECTING });
 
-  ws = new WebSocket(env.NEXT_PUBLIC_WS_URL);
+  ws = new WebSocket(hardwareWsUrl());
 
   ws.addEventListener("open", () => {
     void initializeConnection();
