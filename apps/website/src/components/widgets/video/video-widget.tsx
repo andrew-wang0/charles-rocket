@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { hardwareAudioStreamUrl, hardwareVideoUrl } from "@/env";
+import { useBackendHost } from "@/hooks/use-backend-host";
 import { useConnectionGeneration, useConnectionStatus } from "@/hooks/use-connection-status";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/util/cn";
@@ -26,13 +27,14 @@ export function VideoWidget() {
   const audioSocketRef = React.useRef<WebSocket | null>(null);
   const nextAudioTimeRef = React.useRef(0);
   const status = useConnectionStatus();
+  const backendHost = useBackendHost();
   const connectionGeneration = useConnectionGeneration();
   const [loadedStreamKey, setLoadedStreamKey] = React.useState<string | null>(null);
   const streamKey = `${connectionGeneration}:${attempt}`;
   const hasSignal = loadedStreamKey === streamKey;
 
   const streamUrl = React.useMemo(() => {
-    const url = new URL(hardwareVideoUrl());
+    const url = new URL(hardwareVideoUrl(backendHost));
     if (url.protocol === "ws:") {
       url.protocol = "http:";
     } else if (url.protocol === "wss:") {
@@ -42,10 +44,10 @@ export function VideoWidget() {
     url.searchParams.set("attempt", String(attempt));
     url.searchParams.set("connection", String(connectionGeneration));
     return url.toString();
-  }, [attempt, connectionGeneration]);
+  }, [attempt, backendHost, connectionGeneration]);
 
   const audioSocketUrl = React.useMemo(() => {
-    const url = new URL(hardwareAudioStreamUrl());
+    const url = new URL(hardwareAudioStreamUrl(backendHost));
     if (url.protocol === "http:") {
       url.protocol = "ws:";
     } else if (url.protocol === "https:") {
@@ -54,7 +56,7 @@ export function VideoWidget() {
 
     url.searchParams.set("connection", String(connectionGeneration));
     return url.toString();
-  }, [connectionGeneration]);
+  }, [backendHost, connectionGeneration]);
 
   const getAudioContext = () => {
     if (audioContextRef.current === null) {

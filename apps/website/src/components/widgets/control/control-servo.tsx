@@ -4,7 +4,7 @@ import React from "react";
 
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { WidgetNoSignal } from "@/components/widgets/widget-no-signal";
-import { useServo, useServoControl } from "@/hooks/use-servo";
+import { useServoControl } from "@/hooks/use-servo";
 import { cn } from "@/lib/util/cn";
 import { ServoState } from "@/types/servo";
 
@@ -14,6 +14,35 @@ type Props = {
 
 const SERVO_TRANSITION_SECONDS = 0.4;
 const SERVO_SLOW_TRANSITION_SECONDS = 15;
+
+function getOpeningTransitionSeconds(index: number) {
+  return index === 0 || index === 3 ? SERVO_SLOW_TRANSITION_SECONDS : SERVO_TRANSITION_SECONDS;
+}
+
+function getClosingTransitionSeconds(index: number) {
+  return index === 1 || index === 2 || index === 3
+    ? SERVO_SLOW_TRANSITION_SECONDS
+    : SERVO_TRANSITION_SECONDS;
+}
+
+function assertCompatibleServoGroup(indexes: number[]) {
+  if (indexes.length <= 1) return;
+
+  const openingTimes = indexes.map(getOpeningTransitionSeconds);
+  const closingTimes = indexes.map(getClosingTransitionSeconds);
+
+  if (!openingTimes.every((time) => time === openingTimes[0])) {
+    throw new Error(`Servo group [${indexes.join(", ")}] has mismatched opening transition times`);
+  }
+
+  if (!closingTimes.every((time) => time === closingTimes[0])) {
+    throw new Error(`Servo group [${indexes.join(", ")}] has mismatched closing transition times`);
+  }
+}
+
+function formatServoLabel(indexes: number[]) {
+  return `SERVO ${indexes.map((index) => index + 1).join(" & ")}`;
+}
 
 function getStatusClassName(state: ServoState) {
   switch (state) {
@@ -32,18 +61,20 @@ function getStatusClassName(state: ServoState) {
 
 function getTransitionSeconds(index: number, state: ServoState) {
   if (state === ServoState.OPENING) {
-    return index === 0 ? SERVO_SLOW_TRANSITION_SECONDS : SERVO_TRANSITION_SECONDS;
+    return getOpeningTransitionSeconds(index);
   }
 
   if (state === ServoState.CLOSING) {
-    return index === 1 || index === 2 ? SERVO_SLOW_TRANSITION_SECONDS : SERVO_TRANSITION_SECONDS;
+    return getClosingTransitionSeconds(index);
   }
 
   return null;
 }
 
-function useServoRemainingSeconds(index: number, state: ServoState) {
-  const transitionSeconds = getTransitionSeconds(index, state);
+function useServoRemainingSeconds(indexes: number[], state: ServoState) {
+  const referenceIndex = indexes[0];
+  const transitionSeconds =
+    referenceIndex === undefined ? null : getTransitionSeconds(referenceIndex, state);
   const [startedAt, setStartedAt] = React.useState(() => Date.now());
   const [now, setNow] = React.useState(() => Date.now());
 
@@ -68,19 +99,18 @@ function useServoRemainingSeconds(index: number, state: ServoState) {
   return Math.max(0, transitionSeconds - (now - startedAt) / 1000);
 }
 
-function ServoStatusCircle({ index }: { index: number }) {
-  const servo = useServo(index);
-  const remainingSeconds = useServoRemainingSeconds(index, servo.state);
+function ServoStatusCircle({ indexes, state }: { indexes: number[]; state: ServoState }) {
+  const remainingSeconds = useServoRemainingSeconds(indexes, state);
 
   return (
     <div className="flex flex-col items-center gap-1">
       <div
         className={cn(
           "flex size-16 cursor-not-allowed items-center justify-center rounded-full border text-[0.65rem] font-medium capitalize",
-          getStatusClassName(servo.state),
+          getStatusClassName(state),
         )}
       >
-        <span>{servo.state}</span>
+        <span>{state}</span>
       </div>
       <div className="text-muted-foreground h-4 text-xs tabular-nums">
         {remainingSeconds === null ? "" : remainingSeconds.toFixed(1)}
@@ -90,35 +120,26 @@ function ServoStatusCircle({ index }: { index: number }) {
 }
 
 export function ControlServo({ indexes, className, ...props }: Props) {
+  assertCompatibleServoGroup(indexes);
+
   const servoGroup = useServoControl(indexes);
 
   async function handleSwitch() {
     try {
       await servoGroup.toggle();
     } catch (error) {
-      console.error(
-        `Failed to switch servo group ${indexes.map((index) => index + 1).join(", ")}`,
-        error,
-      );
+      console.error(`Failed to switch ${formatServoLabel(indexes)}`, error);
     }
   }
 
   return (
     <div
-      className={cn("flex h-full min-w-0 flex-col justify-between gap-y-2", className)}
+      className={cn("flex h-full min-w-0 flex-col items-center justify-between gap-y-2", className)}
       {...props}
     >
-      <div className="grid w-full auto-cols-fr grid-flow-col gap-x-2">
-        {indexes.map((index) => (
-          <p key={index} className="text-center">
-            SERVO {index + 1}
-          </p>
-        ))}
-      </div>
-      <div className="grid w-full flex-1 auto-cols-fr grid-flow-col place-items-center gap-x-2">
-        {indexes.map((index) => (
-          <ServoStatusCircle key={index} index={index} />
-        ))}
+      <p className="text-center">{formatServoLabel(indexes)}</p>
+      <div className="flex flex-1 items-center justify-center">
+        <ServoStatusCircle indexes={indexes} state={servoGroup.state} />
       </div>
       <div className="w-full">
         {servoGroup.anyUnknown ? (
@@ -126,10 +147,10 @@ export function ControlServo({ indexes, className, ...props }: Props) {
         ) : (
           <WidgetLockableButton
             className="w-full"
+            disabled={servoGroup.isBusy}
             onClick={() => {
               void handleSwitch();
             }}
-            disabled={servoGroup.isBusy}
           >
             SWITCH
           </WidgetLockableButton>

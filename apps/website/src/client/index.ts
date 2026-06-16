@@ -210,6 +210,18 @@ export function connect() {
   });
 }
 
+export function reconnect() {
+  if (ws) {
+    const socket = ws;
+    ws = null;
+    rejectPending(new Error("WebSocket reconnected"));
+    setState({ status: ConnectionStatus.CLOSED });
+    socket.close();
+  }
+
+  connect();
+}
+
 const pending = new Map<
   string,
   {

@@ -37,14 +37,17 @@ export function ControlIgnition({ className, ...props }: Props) {
     >
       <p className="text-center">IGNITION</p>
       <div className="flex flex-1 items-center justify-center">
-        <div
-          className={cn(
-            "flex size-16 items-center justify-center rounded-full border text-[0.65rem] font-medium",
-            getStatusClassName(ignition.state),
-            ignition.isBusy && "animation-duration-[250ms] animate-pulse",
-          )}
-        >
-          <span>{ignition.state}</span>
+        <div className="flex flex-col items-center gap-1">
+          <div
+            className={cn(
+              "flex size-16 items-center justify-center rounded-full border text-[0.65rem] font-medium",
+              getStatusClassName(ignition.state),
+              ignition.isBusy && "animation-duration-[250ms] animate-pulse",
+            )}
+          >
+            <span>{ignition.state}</span>
+          </div>
+          <div aria-hidden="true" className="text-muted-foreground h-4 text-xs tabular-nums" />
         </div>
       </div>
       <div className="w-full">
