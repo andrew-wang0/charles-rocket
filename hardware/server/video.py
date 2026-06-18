@@ -14,9 +14,8 @@ from config import (
     VIDEO_STREAM_PATH,
     VIDEO_STREAM_PORT,
 )
-from server.cors import private_network_cors_middleware
-from server.audio import WavAudioRecorder
 from read import CameraReader
+from server.audio import WavAudioRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,6 @@ def stream_headers(content_type: str) -> dict[str, str]:
         "Pragma": "no-cache",
         "Connection": "close",
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Private-Network": "true",
     }
 
 
@@ -145,7 +143,7 @@ async def serve_video_server(audio_recorder: WavAudioRecorder) -> None:
     if not camera_reader.available:
         logger.warning("camera reader unavailable: %s", camera_reader.error or "unknown_error")
 
-    app = web.Application(middlewares=[private_network_cors_middleware])
+    app = web.Application()
     app[CAMERA_READER_APP_KEY] = camera_reader
     app[AUDIO_RECORDER_APP_KEY] = audio_recorder
     app.router.add_get(VIDEO_STREAM_PATH, camera_stream)

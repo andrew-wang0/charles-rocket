@@ -18,7 +18,7 @@ export function subscribeBackendHost(listener: () => void) {
 }
 
 export function getDefaultBackendHost() {
-  return normalizeBackendHostInput(process.env.NEXT_PUBLIC_BACKEND_HOST ?? "");
+  return process.env.NEXT_PUBLIC_BACKEND_HOST ?? "";
 }
 
 function readStoredBackendHost() {
@@ -36,7 +36,6 @@ export function getStoredBackendHost() {
   return readStoredBackendHost();
 }
 
-/** Hardware host only — never derived from the website URL. */
 export function getBackendHost() {
   return readStoredBackendHost() ?? getDefaultBackendHost();
 }

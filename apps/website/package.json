@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "next build --webpack",
-    "dev": "next dev --webpack",
+    "build": "next build",
+    "dev": "next dev",
     "format": "prettier --write .",
     "lint": "eslint --fix --max-warnings=0",
     "mock:server": "tsx --tsconfig tsconfig.json test/mock-server.ts",
@@ -15,7 +15,6 @@
   "dependencies": {
     "@danscan/zod-jsonrpc": "3.3.0",
     "@phosphor-icons/react": "2.1.10",
-    "@serwist/next": "^9.5.11",
     "@t3-oss/env-nextjs": "0.13.11",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -36,7 +35,6 @@
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
     "@types/ws": "8.18.1",
-    "serwist": "^9.5.11",
     "tailwindcss": "4.3.0",
     "tsx": "4.22.4",
     "typescript": "6.0.3",
