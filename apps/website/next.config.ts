@@ -14,6 +14,20 @@ const withSerwist = withSerwistInit({
   disable: process.env.NODE_ENV !== "production",
 });
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Permissions-Policy",
+            value: "local-network-access=*",
+          },
+        ],
+      },
+    ];
+  },
+};
 
 export default withSerwist(nextConfig);

@@ -28,7 +28,7 @@ from config import (
 from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
 from control.status_led import notify_status_led_state_changed
-from read import LoadSampler, PressureSampler
+from server.cors import private_network_cors_header_list, websocket_process_request
 from server.audio import WavAudioRecorder
 
 logger = logging.getLogger(__name__)
@@ -946,6 +946,8 @@ async def serve_websocket_server(
             HOST,
             PORT,
             close_timeout=WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+            extra_headers=private_network_cors_header_list(),
+            process_request=websocket_process_request,
         ):
             logger.info("websocket server listening on ws://%s:%s", HOST, PORT)
             start_sensor_startup_tasks(calibration_set)

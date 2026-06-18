@@ -36,6 +36,7 @@ export function getStoredBackendHost() {
   return readStoredBackendHost();
 }
 
+/** Hardware host only — never derived from the website URL. */
 export function getBackendHost() {
   return readStoredBackendHost() ?? getDefaultBackendHost();
 }

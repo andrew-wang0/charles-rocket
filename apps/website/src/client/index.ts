@@ -184,19 +184,35 @@ export function connect() {
 
   setState({ status: ConnectionStatus.CONNECTING });
 
-  ws = new WebSocket(hardwareWsUrl());
+  const url = hardwareWsUrl();
+  console.info("[charles] connecting websocket:", url);
+
+  ws = new WebSocket(url);
 
   ws.addEventListener("open", () => {
+    console.info("[charles] websocket connected:", url);
     void initializeConnection();
   });
 
-  ws.addEventListener("close", () => {
+  ws.addEventListener("close", (event) => {
+    console.warn("[charles] websocket closed:", url, event.code, event.reason || "no reason");
     rejectPending(new Error("WebSocket closed"));
     setState({ status: ConnectionStatus.CLOSED });
     ws = null;
   });
 
   ws.addEventListener("error", () => {
+    const pageHost = typeof window !== "undefined" ? window.location.hostname : "";
+    const pageIsLoopback =
+      !pageHost || pageHost === "localhost" || pageHost === "127.0.0.1" || pageHost === "::1";
+
+    console.error("[charles] websocket error:", url);
+    if (!pageIsLoopback) {
+      console.error(
+        "[charles] Chrome blocks HTTP LAN pages from reaching other devices unless Local Network Access is allowed. " +
+          "Open the lock icon → Site settings → Local network access → Allow, or use http://localhost:3000 on this machine.",
+      );
+    }
     rejectPending(new Error("WebSocket error"));
     setState({ status: ConnectionStatus.ERROR });
   });
