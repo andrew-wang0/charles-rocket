@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import React from "react";
 
+import { ConnectionManager } from "@/components/layout/connection-manager";
 import { DataReader } from "@/components/layout/data-reader";
 import { Header } from "@/components/layout/header/header";
 import { cn } from "@/lib/util/cn";
@@ -24,6 +25,7 @@ export default function RootLayout({
       <body
         className={cn(jetbrainsMono.className, "flex h-dvh flex-col overflow-hidden select-none")}
       >
+        <ConnectionManager />
         <DataReader />
         <Header />
         {children}

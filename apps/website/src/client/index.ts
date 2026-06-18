@@ -16,6 +16,7 @@ import {
   servoStateNotification,
 } from "@/client/router/control/servo";
 import { hardwareWsUrl } from "@/env";
+import { getBackendHost } from "@/lib/backend-host";
 import { useStore } from "@/lib/store";
 
 export enum ConnectionStatus {
@@ -172,7 +173,16 @@ async function initializeConnection() {
   });
 }
 
+function hasBackendHost() {
+  return getBackendHost().trim() !== "";
+}
+
 export function connect() {
+  if (!hasBackendHost()) {
+    setState({ status: ConnectionStatus.CLOSED });
+    return;
+  }
+
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
   }
@@ -212,6 +222,11 @@ export function reconnect() {
     rejectPending(new Error("WebSocket reconnected"));
     setState({ status: ConnectionStatus.CLOSED });
     socket.close();
+  }
+
+  if (!hasBackendHost()) {
+    setState({ status: ConnectionStatus.CLOSED });
+    return;
   }
 
   connect();

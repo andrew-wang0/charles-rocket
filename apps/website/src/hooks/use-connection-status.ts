@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
-import { ConnectionStatus, reconnect, status, subscribe } from "@/client";
-import { useBackendHost } from "@/hooks/use-backend-host";
+import { ConnectionStatus, status, subscribe } from "@/client";
 
 function getSnapshot() {
   return status;
@@ -14,11 +13,5 @@ function getServerSnapshot() {
 }
 
 export function useConnectionStatus() {
-  const backendHost = useBackendHost();
-
-  useEffect(() => {
-    reconnect();
-  }, [backendHost]);
-
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

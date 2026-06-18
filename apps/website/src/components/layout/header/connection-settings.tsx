@@ -3,7 +3,6 @@
 import { GearIcon, XIcon } from "@phosphor-icons/react";
 import React from "react";
 
-import { reconnect } from "@/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,13 +37,7 @@ export function ConnectionSettings() {
   }
 
   function applyHost(nextHost: string | null) {
-    const previousHost = backendHost;
     setBackendHost(nextHost);
-    const resolvedHost = nextHost ?? defaultHost;
-
-    if (resolvedHost !== previousHost) {
-      reconnect();
-    }
   }
 
   function handleSave(event: React.SyntheticEvent<HTMLFormElement>) {

@@ -5,7 +5,6 @@ import type { ChartConfig } from "@/components/ui/chart";
 import {
   ChartContainer,
   ChartLegend,
-  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
@@ -35,6 +34,46 @@ export const chartConfig = {
 
 const PRESSURE_AXIS_TICK_COUNT = 5;
 const MIN_PRESSURE_AXIS_RANGE_PSI = 10;
+type PressureSeriesKey = keyof typeof chartConfig;
+const PRESSURE_SERIES_KEYS = Object.keys(chartConfig) as PressureSeriesKey[];
+
+function PressureLegendContent({
+  hiddenSeries,
+  onToggleSeries,
+}: {
+  hiddenSeries: Set<PressureSeriesKey>;
+  onToggleSeries: (key: PressureSeriesKey) => void;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-4 pt-3">
+      {PRESSURE_SERIES_KEYS.map((key) => {
+        const item = chartConfig[key];
+        const hidden = hiddenSeries.has(key);
+
+        return (
+          <button
+            key={key}
+            aria-pressed={!hidden}
+            className={`text-foreground flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 transition-opacity hover:opacity-75 ${
+              hidden ? "opacity-55" : "opacity-100"
+            }`}
+            onClick={() => onToggleSeries(key)}
+            type="button"
+          >
+            <span
+              className="h-2 w-2 shrink-0 rounded-xs border"
+              style={{
+                backgroundColor: hidden ? "transparent" : item.color,
+                borderColor: item.color,
+              }}
+            />
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function getNiceAxisStep(minStep: number) {
   const magnitude = 10 ** Math.floor(Math.log10(minStep));
@@ -77,11 +116,16 @@ function buildPressureAxisTicks(chartData: PressureChartPoint[]) {
 export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
   const chartData = useStore((store) => store.pressureChartData);
   const chartWindowMs = useStore((store) => store.pressureChartWindowMs);
+  const [hiddenSeries, setHiddenSeries] = React.useState<Set<PressureSeriesKey>>(() => new Set());
   const latestTime = chartData.at(-1)?.time ?? 0;
   const windowStart = Math.max(0, latestTime - chartWindowMs);
   const visibleChartData = React.useMemo(
     () => chartData.filter((point) => point.time >= windowStart),
     [chartData, windowStart],
+  );
+  const visibleSeries = React.useMemo(
+    () => PRESSURE_SERIES_KEYS.filter((key) => !hiddenSeries.has(key)),
+    [hiddenSeries],
   );
 
   const tickValues = React.useMemo(
@@ -92,6 +136,17 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
     () => buildPressureAxisTicks(visibleChartData),
     [visibleChartData],
   );
+  const toggleSeries = React.useCallback((key: PressureSeriesKey) => {
+    setHiddenSeries((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <ChartContainer
@@ -141,31 +196,22 @@ export const PressureWidgetChart = React.memo(function PressureWidgetChart() {
           }
           labelFormatter={() => null}
         />
-        <ChartLegend content={<ChartLegendContent />} />
-        <Line
-          dataKey="pt1"
-          type="linear"
-          stroke="var(--color-pt1)"
-          dot={false}
-          connectNulls
-          isAnimationActive={false}
+        <ChartLegend
+          content={
+            <PressureLegendContent hiddenSeries={hiddenSeries} onToggleSeries={toggleSeries} />
+          }
         />
-        <Line
-          dataKey="pt2"
-          type="linear"
-          stroke="var(--color-pt2)"
-          dot={false}
-          connectNulls
-          isAnimationActive={false}
-        />
-        <Line
-          dataKey="pt3"
-          type="linear"
-          stroke="var(--color-pt3)"
-          dot={false}
-          connectNulls
-          isAnimationActive={false}
-        />
+        {visibleSeries.map((key) => (
+          <Line
+            key={key}
+            dataKey={key}
+            type="linear"
+            stroke={`var(--color-${key})`}
+            dot={false}
+            connectNulls
+            isAnimationActive={false}
+          />
+        ))}
       </LineChart>
     </ChartContainer>
   );
