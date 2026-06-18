@@ -14,6 +14,8 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/util/cn";
 
 const STREAM_RETRY_MS = 2_000;
+const STREAM_STALE_MS = 3_000;
+const STREAM_STALE_CHECK_MS = 500;
 const AUDIO_START_DELAY_SECONDS = 0.06;
 const AUDIO_MAX_BUFFER_SECONDS = 0.35;
 const PCM_SAMPLE_RATE = 48_000;
@@ -34,6 +36,72 @@ function buildVideoStreamUrl(backendHost: string, attempt: number) {
   return url.toString();
 }
 
+async function consumeMjpegStream(
+  url: string,
+  onFrame: (blob: Blob) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const response = await fetch(url, { cache: "no-store", signal });
+  if (!response.ok) {
+    throw new Error(`Video stream failed: ${response.status}`);
+  }
+
+  const body = response.body;
+  if (body === null) {
+    throw new Error("Video stream missing body");
+  }
+
+  const reader = body.getReader();
+  let buffer = new Uint8Array(0);
+
+  const append = (chunk: Uint8Array) => {
+    const next = new Uint8Array(buffer.length + chunk.length);
+    next.set(buffer);
+    next.set(chunk, buffer.length);
+    buffer = next;
+  };
+
+  const findMarker = (data: Uint8Array, start: number, first: number, second: number) => {
+    for (let index = start; index < data.length - 1; index += 1) {
+      if (data[index] === first && data[index + 1] === second) {
+        return index;
+      }
+    }
+
+    return -1;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    if (value !== undefined) {
+      append(value);
+    }
+
+    while (true) {
+      const start = findMarker(buffer, 0, 0xff, 0xd8);
+      if (start < 0) {
+        if (buffer.length > 1) {
+          buffer = buffer.slice(-1);
+        }
+        break;
+      }
+
+      const end = findMarker(buffer, start + 2, 0xff, 0xd9);
+      if (end < 0) {
+        break;
+      }
+
+      const frame = buffer.slice(start, end + 2);
+      buffer = buffer.slice(end + 2);
+      onFrame(new Blob([frame], { type: "image/jpeg" }));
+    }
+  }
+}
+
 export function VideoWidget() {
   const [attempt, setAttempt] = React.useState(0);
   const [audioMuted, setAudioMuted] = React.useState(true);
@@ -43,9 +111,8 @@ export function VideoWidget() {
   const nextAudioTimeRef = React.useRef(0);
   const status = useConnectionStatus();
   const backendHost = useBackendHost();
-  const [loadedStreamKey, setLoadedStreamKey] = React.useState<string | null>(null);
-  const streamKey = attempt > 0 ? `${backendHost}:${attempt}` : backendHost;
-  const hasSignal = loadedStreamKey === streamKey;
+  const [frameUrl, setFrameUrl] = React.useState<string | null>(null);
+  const [hasSignal, setHasSignal] = React.useState(false);
   const streamUrl = React.useMemo(
     () => buildVideoStreamUrl(backendHost, attempt),
     [attempt, backendHost],
@@ -99,20 +166,84 @@ export function VideoWidget() {
 
   React.useEffect(() => {
     setAttempt(0);
-    setLoadedStreamKey(null);
+    setFrameUrl(null);
+    setHasSignal(false);
   }, [backendHost]);
 
   React.useEffect(() => {
-    if (hasSignal) return;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    let reconnectTimeout: number | null = null;
+    let staleCheckInterval: number | null = null;
+    let reconnectScheduled = false;
+    let lastFrameAt = Date.now();
+    const controller = new AbortController();
 
-    const timeout = window.setTimeout(() => {
-      setAttempt((current) => current + 1);
-    }, STREAM_RETRY_MS);
+    const revokeObjectUrl = () => {
+      if (objectUrl === null) return;
+      URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+    };
+
+    const scheduleReconnect = () => {
+      if (cancelled || reconnectScheduled) return;
+
+      reconnectScheduled = true;
+      setHasSignal(false);
+      revokeObjectUrl();
+      setFrameUrl(null);
+
+      reconnectTimeout = window.setTimeout(() => {
+        if (!cancelled) {
+          setAttempt((current) => current + 1);
+        }
+      }, STREAM_RETRY_MS);
+    };
+
+    const onFrame = (blob: Blob) => {
+      if (cancelled) return;
+
+      lastFrameAt = Date.now();
+      setHasSignal(true);
+      revokeObjectUrl();
+      objectUrl = URL.createObjectURL(blob);
+      setFrameUrl(objectUrl);
+    };
+
+    staleCheckInterval = window.setInterval(() => {
+      if (cancelled || Date.now() - lastFrameAt < STREAM_STALE_MS) return;
+
+      controller.abort();
+      scheduleReconnect();
+    }, STREAM_STALE_CHECK_MS);
+
+    void consumeMjpegStream(streamUrl, onFrame, controller.signal)
+      .then(() => {
+        if (!cancelled) {
+          scheduleReconnect();
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled || (error instanceof DOMException && error.name === "AbortError")) return;
+
+        scheduleReconnect();
+      });
 
     return () => {
-      window.clearTimeout(timeout);
+      cancelled = true;
+      controller.abort();
+
+      if (reconnectTimeout !== null) {
+        window.clearTimeout(reconnectTimeout);
+      }
+
+      if (staleCheckInterval !== null) {
+        window.clearInterval(staleCheckInterval);
+      }
+
+      revokeObjectUrl();
     };
-  }, [attempt, backendHost, hasSignal]);
+  }, [streamUrl]);
 
   React.useEffect(() => {
     if (audioMuted || !audioAvailable || status !== ConnectionStatus.CONNECTED) {
@@ -203,20 +334,13 @@ export function VideoWidget() {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            key={streamKey}
             alt="Live camera feed"
             className={cn("h-full w-full object-contain object-center", {
               invisible: !hasSignal,
             })}
             decoding="async"
             loading="eager"
-            onError={() => {
-              setLoadedStreamKey(null);
-            }}
-            onLoad={() => {
-              setLoadedStreamKey(streamKey);
-            }}
-            src={streamUrl}
+            src={frameUrl ?? undefined}
           />
           {!hasSignal ? (
             <div className="bg-muted text-muted-foreground absolute border p-2 text-sm">

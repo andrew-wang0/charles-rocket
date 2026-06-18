@@ -24,6 +24,7 @@ CAMERA_READER_APP_KEY = "camera_reader"
 AUDIO_RECORDER_APP_KEY = "audio_recorder"
 VIDEO_SHUTDOWN_TIMEOUT_SECONDS = 0.1
 INITIAL_FRAME_TIMEOUT_SECONDS = 1.0
+STREAM_STALE_TIMEOUT_SECONDS = 3.0
 
 
 def stream_headers(content_type: str) -> dict[str, str]:
@@ -74,6 +75,7 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
     frame_interval = 1 / max(1, VIDEO_STREAM_FPS)
     poll_interval = min(frame_interval / 2, 0.005)
     last_send_time = 0.0
+    last_activity_time = loop.time()
 
     try:
         while True:
@@ -81,6 +83,10 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
             frame_time = camera_reader.latest_frame_time_ms()
 
             if frame is None or frame_time == last_frame_time:
+                if loop.time() - last_activity_time > STREAM_STALE_TIMEOUT_SECONDS:
+                    logger.info("closing stale video stream connection")
+                    break
+
                 await asyncio.sleep(poll_interval)
                 continue
 
@@ -99,6 +105,7 @@ async def camera_stream(request: web.Request) -> web.StreamResponse:
             await response.write(frame)
             await response.write(b"\r\n")
             last_send_time = loop.time()
+            last_activity_time = last_send_time
     except asyncio.CancelledError:
         raise
     except (ConnectionError, ConnectionResetError, BrokenPipeError):
