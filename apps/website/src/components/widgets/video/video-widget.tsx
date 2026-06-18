@@ -9,7 +9,7 @@ import { CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { WidgetCard } from "@/components/widgets/widget-card";
 import { hardwareAudioStreamUrl, hardwareVideoUrl } from "@/env";
 import { useBackendHost } from "@/hooks/use-backend-host";
-import { useConnectionGeneration, useConnectionStatus } from "@/hooks/use-connection-status";
+import { useConnectionStatus } from "@/hooks/use-connection-status";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/util/cn";
 
@@ -18,6 +18,21 @@ const AUDIO_START_DELAY_SECONDS = 0.06;
 const AUDIO_MAX_BUFFER_SECONDS = 0.35;
 const PCM_SAMPLE_RATE = 48_000;
 const PCM_CHANNELS = 1;
+
+function buildVideoStreamUrl(backendHost: string, attempt: number) {
+  const url = new URL(hardwareVideoUrl(backendHost));
+  if (url.protocol === "ws:") {
+    url.protocol = "http:";
+  } else if (url.protocol === "wss:") {
+    url.protocol = "https:";
+  }
+
+  if (attempt > 0) {
+    url.searchParams.set("attempt", String(attempt));
+  }
+
+  return url.toString();
+}
 
 export function VideoWidget() {
   const [attempt, setAttempt] = React.useState(0);
@@ -28,23 +43,13 @@ export function VideoWidget() {
   const nextAudioTimeRef = React.useRef(0);
   const status = useConnectionStatus();
   const backendHost = useBackendHost();
-  const connectionGeneration = useConnectionGeneration();
   const [loadedStreamKey, setLoadedStreamKey] = React.useState<string | null>(null);
-  const streamKey = `${connectionGeneration}:${attempt}`;
+  const streamKey = attempt > 0 ? `${backendHost}:${attempt}` : backendHost;
   const hasSignal = loadedStreamKey === streamKey;
-
-  const streamUrl = React.useMemo(() => {
-    const url = new URL(hardwareVideoUrl(backendHost));
-    if (url.protocol === "ws:") {
-      url.protocol = "http:";
-    } else if (url.protocol === "wss:") {
-      url.protocol = "https:";
-    }
-
-    url.searchParams.set("attempt", String(attempt));
-    url.searchParams.set("connection", String(connectionGeneration));
-    return url.toString();
-  }, [attempt, backendHost, connectionGeneration]);
+  const streamUrl = React.useMemo(
+    () => buildVideoStreamUrl(backendHost, attempt),
+    [attempt, backendHost],
+  );
 
   const audioSocketUrl = React.useMemo(() => {
     const url = new URL(hardwareAudioStreamUrl(backendHost));
@@ -54,9 +59,8 @@ export function VideoWidget() {
       url.protocol = "wss:";
     }
 
-    url.searchParams.set("connection", String(connectionGeneration));
     return url.toString();
-  }, [backendHost, connectionGeneration]);
+  }, [backendHost]);
 
   const getAudioContext = () => {
     if (audioContextRef.current === null) {
@@ -94,7 +98,12 @@ export function VideoWidget() {
   };
 
   React.useEffect(() => {
-    if (hasSignal || status !== ConnectionStatus.CONNECTED) return;
+    setAttempt(0);
+    setLoadedStreamKey(null);
+  }, [backendHost]);
+
+  React.useEffect(() => {
+    if (hasSignal) return;
 
     const timeout = window.setTimeout(() => {
       setAttempt((current) => current + 1);
@@ -103,7 +112,7 @@ export function VideoWidget() {
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [hasSignal, status]);
+  }, [attempt, backendHost, hasSignal]);
 
   React.useEffect(() => {
     if (audioMuted || !audioAvailable || status !== ConnectionStatus.CONNECTED) {
@@ -194,10 +203,13 @@ export function VideoWidget() {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
+            key={streamKey}
             alt="Live camera feed"
             className={cn("h-full w-full object-contain object-center", {
               invisible: !hasSignal,
             })}
+            decoding="async"
+            loading="eager"
             onError={() => {
               setLoadedStreamKey(null);
             }}

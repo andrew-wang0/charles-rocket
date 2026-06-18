@@ -29,7 +29,6 @@ let ws: WebSocket | null = null;
 
 export const listeners = new Set<() => void>();
 export let status: ConnectionStatus = ConnectionStatus.CLOSED;
-export let connectionGeneration = 0;
 
 function emit() {
   for (const listener of listeners) listener();
@@ -40,11 +39,8 @@ export function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-function setState(next: Partial<{ status: ConnectionStatus; connectionGeneration: number }>) {
+function setState(next: Partial<{ status: ConnectionStatus }>) {
   if (next.status) status = next.status;
-  if (next.connectionGeneration !== undefined) {
-    connectionGeneration = next.connectionGeneration;
-  }
   emit();
 }
 
@@ -169,7 +165,6 @@ async function initializeConnection() {
 
   setState({
     status: ConnectionStatus.CONNECTED,
-    connectionGeneration: connectionGeneration + 1,
   });
 
   void Promise.all([syncServoState(), syncIgnitionState()]).catch(() => {

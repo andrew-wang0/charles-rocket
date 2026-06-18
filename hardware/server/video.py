@@ -31,7 +31,7 @@ def stream_headers(content_type: str) -> dict[str, str]:
         "Content-Type": content_type,
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",
-        "Connection": "close",
+        "Connection": "keep-alive",
         "Access-Control-Allow-Origin": "*",
     }
 
