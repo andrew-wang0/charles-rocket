@@ -13,14 +13,13 @@ from config import (
     STATUS_LED_ALERT_BLINK_INTERVAL_SECONDS,
     STATUS_LED_DATA_PIN,
     STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS,
+    STATUS_LED_IDLE_COLOR,
     STATUS_LED_PIXEL_COUNT,
 )
 
 logger = logging.getLogger(__name__)
 RASPBERRY_PI_SYSTEM_PACKAGES = Path("/usr/lib/python3/dist-packages")
 
-GREEN = (0, 255, 0)
-RED = (255, 0, 0)
 OFF = (0, 0, 0)
 
 BlinkState = tuple[tuple[int, int, int], float]
@@ -28,7 +27,7 @@ StateProvider = Callable[[], BlinkState]
 
 
 def default_blink_state() -> BlinkState:
-    return GREEN, STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS
+    return STATUS_LED_IDLE_COLOR, STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS
 
 
 class StatusLed:
