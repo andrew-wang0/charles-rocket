@@ -17,12 +17,17 @@ from config import (
     PRESSURE_TRANSDUCER_COUNT,
     SERVO_ACTUATION_RANGE,
     SERVO_CHANNELS,
+    STATUS_LED_ALERT_BLINK_INTERVAL_SECONDS,
+    STATUS_LED_ALERT_COLOR,
+    STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS,
+    STATUS_LED_IDLE_COLOR,
     SYSTEM_TIME_SYNC_COMMAND_TIMEOUT_SECONDS,
     SYSTEM_TIME_SYNC_ENABLED,
     SYSTEM_TIME_SYNC_MIN_DRIFT_MS,
 )
 from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
+from control.status_led import notify_status_led_state_changed
 from read import LoadSampler, PressureSampler
 from server.audio import WavAudioRecorder
 
@@ -53,6 +58,19 @@ clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
 transition_tasks: set[asyncio.Task[None]] = set()
 startup_tasks: set[asyncio.Task[None]] = set()
+
+
+def get_status_led_blink() -> tuple[tuple[int, int, int], float]:
+    if ignition_controller is not None and ignition_controller.available:
+        if ignition_controller.state_payload()["state"] == "ON":
+            return STATUS_LED_ALERT_COLOR, STATUS_LED_ALERT_BLINK_INTERVAL_SECONDS
+
+    if servo_controller is not None and servo_controller.available:
+        for channel_state in servo_controller.state_payload()["channels"]:
+            if channel_state["state"] in ("opening", "closing"):
+                return STATUS_LED_ALERT_COLOR, STATUS_LED_ALERT_BLINK_INTERVAL_SECONDS
+
+    return STATUS_LED_IDLE_COLOR, STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS
 
 
 def initialize_control_runtime(calibration_set: CalibrationSet) -> None:
@@ -490,6 +508,8 @@ async def finish_servo_transition(
             channels,
             target_state,
         )
+    finally:
+        notify_status_led_state_changed()
 
 
 def track_background_task(
@@ -609,6 +629,7 @@ async def finalize_servo_control(
     snapshot = build_servo_snapshot()
 
     if transitioned_channels:
+        notify_status_led_state_changed()
         await broadcast_servo_state(exclude=websocket)
         for channel in transitioned_channels:
             track_transition_task(
@@ -709,6 +730,7 @@ async def handle_ignition_control(
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
 
+    notify_status_led_state_changed()
     await broadcast_ignition_state(exclude=websocket)
 
     return {

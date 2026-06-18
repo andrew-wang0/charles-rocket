@@ -18,7 +18,12 @@ export function subscribeBackendHost(listener: () => void) {
 }
 
 export function getDefaultBackendHost() {
-  return process.env.NEXT_PUBLIC_BACKEND_HOST ?? "";
+  return normalizeBackendHostInput(process.env.NEXT_PUBLIC_BACKEND_HOST ?? "");
+}
+
+function isInvalidHardwareHost(host: string) {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "" || normalized === "0.0.0.0" || normalized === "::";
 }
 
 function readStoredBackendHost() {
@@ -36,8 +41,19 @@ export function getStoredBackendHost() {
   return readStoredBackendHost();
 }
 
+/** Pi hardware host — never the laptop URL and never proxied through this app. */
 export function getBackendHost() {
-  return readStoredBackendHost() ?? getDefaultBackendHost();
+  const stored = readStoredBackendHost();
+  if (stored && !isInvalidHardwareHost(stored)) {
+    return stored;
+  }
+
+  const envHost = getDefaultBackendHost();
+  if (!isInvalidHardwareHost(envHost)) {
+    return envHost;
+  }
+
+  return "";
 }
 
 export function normalizeBackendHostInput(value: string) {
@@ -58,6 +74,9 @@ export function normalizeBackendHostInput(value: string) {
 
 export function setBackendHost(host: string | null) {
   const normalized = host === null ? null : normalizeBackendHostInput(host);
+  if (normalized && isInvalidHardwareHost(normalized)) {
+    return;
+  }
   if (!normalized) {
     try {
       localStorage.removeItem(STORAGE_KEY);
