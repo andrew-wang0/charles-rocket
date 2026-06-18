@@ -37,15 +37,16 @@ function buildVideoStreamUrl(backendHost: string, attempt: number) {
 export function VideoWidget() {
   const [attempt, setAttempt] = React.useState(0);
   const [audioMuted, setAudioMuted] = React.useState(true);
+  const [hasSignal, setHasSignal] = React.useState(false);
   const audioAvailable = useStore((store) => store.readingsStatus.audioOk);
   const audioContextRef = React.useRef<AudioContext | null>(null);
   const audioSocketRef = React.useRef<WebSocket | null>(null);
+  const retryTimeoutRef = React.useRef<number | null>(null);
+  const imageRef = React.useRef<HTMLImageElement | null>(null);
   const nextAudioTimeRef = React.useRef(0);
   const status = useConnectionStatus();
   const backendHost = useBackendHost();
-  const [loadedStreamKey, setLoadedStreamKey] = React.useState<string | null>(null);
   const streamKey = attempt > 0 ? `${backendHost}:${attempt}` : backendHost;
-  const hasSignal = loadedStreamKey === streamKey;
   const streamUrl = React.useMemo(
     () => buildVideoStreamUrl(backendHost, attempt),
     [attempt, backendHost],
@@ -97,22 +98,55 @@ export function VideoWidget() {
     nextAudioTimeRef.current += buffer.duration;
   };
 
+  const clearRetryTimeout = React.useCallback(() => {
+    if (retryTimeoutRef.current !== null) {
+      window.clearTimeout(retryTimeoutRef.current);
+      retryTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleRetry = React.useCallback(() => {
+    if (retryTimeoutRef.current !== null) return;
+
+    retryTimeoutRef.current = window.setTimeout(() => {
+      retryTimeoutRef.current = null;
+      setAttempt((current) => current + 1);
+    }, STREAM_RETRY_MS);
+  }, []);
+
   React.useEffect(() => {
     setAttempt(0);
-    setLoadedStreamKey(null);
-  }, [backendHost]);
+    setHasSignal(false);
+    clearRetryTimeout();
+  }, [backendHost, clearRetryTimeout]);
+
+  React.useEffect(() => {
+    setHasSignal(false);
+  }, [streamKey]);
 
   React.useEffect(() => {
     if (hasSignal) return;
 
-    const timeout = window.setTimeout(() => {
-      setAttempt((current) => current + 1);
-    }, STREAM_RETRY_MS);
+    const interval = window.setInterval(() => {
+      const image = imageRef.current;
+      if (!image) return;
+
+      if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+        setHasSignal(true);
+        clearRetryTimeout();
+      }
+    }, 250);
 
     return () => {
-      window.clearTimeout(timeout);
+      window.clearInterval(interval);
     };
-  }, [attempt, backendHost, hasSignal]);
+  }, [hasSignal, clearRetryTimeout, streamKey]);
+
+  React.useEffect(() => {
+    return () => {
+      clearRetryTimeout();
+    };
+  }, [clearRetryTimeout]);
 
   React.useEffect(() => {
     if (audioMuted || !audioAvailable || status !== ConnectionStatus.CONNECTED) {
@@ -203,18 +237,19 @@ export function VideoWidget() {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
+            ref={imageRef}
             key={streamKey}
             alt="Live camera feed"
-            className={cn("h-full w-full object-contain object-center", {
-              invisible: !hasSignal,
-            })}
+            className="h-full w-full object-contain object-center"
             decoding="async"
             loading="eager"
             onError={() => {
-              setLoadedStreamKey(null);
+              setHasSignal(false);
+              scheduleRetry();
             }}
             onLoad={() => {
-              setLoadedStreamKey(streamKey);
+              setHasSignal(true);
+              clearRetryTimeout();
             }}
             src={streamUrl}
           />
