@@ -33,6 +33,7 @@ async def main() -> None:
             status_led.error or "unknown_error",
         )
     else:
+        status_led.register_shutdown_signals(asyncio.get_running_loop())
         status_led.start()
 
     services = {
@@ -65,7 +66,9 @@ async def main() -> None:
         logger.warning("shutdown requested")
         raise
     finally:
-        await status_led.stop()
+        status_led.force_reset()
+        with contextlib.suppress(Exception):
+            await asyncio.shield(status_led.stop())
 
         for name, task in services.items():
             logger.info("shutting down %s service", name)

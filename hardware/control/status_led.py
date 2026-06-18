@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
 import importlib
 import logging
+import signal
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -40,11 +42,13 @@ class StatusLed:
         self._pixels: Any | None = None
         self._task: asyncio.Task[None] | None = None
         self._state_provider = state_provider or default_blink_state
+        self._exit_handler_registered = False
         self.available = False
         self.error: str | None = None
         self._pin = pin
         self._pixel_count = pixel_count
         self._on = False
+        self._closed = False
 
         try:
             self._add_raspberry_pi_system_packages()
@@ -72,6 +76,44 @@ class StatusLed:
         if RASPBERRY_PI_SYSTEM_PACKAGES.exists() and package_path not in sys.path:
             sys.path.append(package_path)
 
+    def _register_exit_handler(self) -> None:
+        if self._exit_handler_registered:
+            return
+
+        atexit.register(self._reset_on_exit)
+        self._exit_handler_registered = True
+
+    def force_reset(self) -> None:
+        with contextlib.suppress(Exception):
+            self._reset()
+
+    def _reset_on_exit(self) -> None:
+        if self._pixels is None:
+            return
+
+        self.force_reset()
+
+    def register_shutdown_signals(self, loop: asyncio.AbstractEventLoop) -> None:
+        main_task = asyncio.current_task()
+        if main_task is None:
+            return
+
+        def on_shutdown_signal() -> None:
+            logger.info("status led shutdown signal received")
+            self.force_reset()
+            main_task.cancel()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, on_shutdown_signal)
+
+    def _reset(self) -> None:
+        if self._pixels is None:
+            return
+
+        self._pixels.fill(OFF)
+        self._pixels.show()
+
     def _set_color(self, color: tuple[int, int, int]) -> None:
         if self._pixels is None:
             return
@@ -87,6 +129,8 @@ class StatusLed:
                 self._set_color(color if self._on else OFF)
                 await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                self._reset()
             raise
         except Exception:
             logger.exception("status led blink loop failed")
@@ -95,6 +139,7 @@ class StatusLed:
         if not self.available or self._task is not None:
             return
 
+        self._register_exit_handler()
         self._task = asyncio.create_task(self._blink_loop())
         logger.info("status led blink started")
 
@@ -108,8 +153,12 @@ class StatusLed:
         self.close()
 
     def close(self) -> None:
+        if self._closed:
+            return
+
+        self._closed = True
         with contextlib.suppress(Exception):
-            self._set_color(OFF)
+            self._reset()
 
         if self._pixels is not None:
             with contextlib.suppress(Exception):
