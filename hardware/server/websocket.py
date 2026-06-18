@@ -27,6 +27,7 @@ from config import (
 )
 from control.ignition import IgnitionController, IgnitionStableState
 from control.servo import ServoController, ServoStableState
+from control.status_led import notify_status_led_state_changed
 from read import LoadSampler, PressureSampler
 from server.audio import WavAudioRecorder
 
@@ -507,6 +508,8 @@ async def finish_servo_transition(
             channels,
             target_state,
         )
+    finally:
+        notify_status_led_state_changed()
 
 
 def track_background_task(
@@ -626,6 +629,7 @@ async def finalize_servo_control(
     snapshot = build_servo_snapshot()
 
     if transitioned_channels:
+        notify_status_led_state_changed()
         await broadcast_servo_state(exclude=websocket)
         for channel in transitioned_channels:
             track_transition_task(
@@ -726,6 +730,7 @@ async def handle_ignition_control(
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
 
+    notify_status_led_state_changed()
     await broadcast_ignition_state(exclude=websocket)
 
     return {

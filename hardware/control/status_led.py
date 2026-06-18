@@ -27,6 +27,13 @@ OFF = (0, 0, 0)
 BlinkState = tuple[tuple[int, int, int], float]
 StateProvider = Callable[[], BlinkState]
 
+_status_led: StatusLed | None = None
+
+
+def notify_status_led_state_changed() -> None:
+    if _status_led is not None:
+        _status_led.notify_state_changed()
+
 
 def default_blink_state() -> BlinkState:
     return STATUS_LED_IDLE_COLOR, STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS
@@ -49,6 +56,8 @@ class StatusLed:
         self._pixel_count = pixel_count
         self._on = False
         self._closed = False
+        self._active_blink: BlinkState | None = None
+        self._state_changed = asyncio.Event()
 
         try:
             self._add_raspberry_pi_system_packages()
@@ -107,6 +116,9 @@ class StatusLed:
             with contextlib.suppress(NotImplementedError):
                 loop.add_signal_handler(sig, on_shutdown_signal)
 
+    def notify_state_changed(self) -> None:
+        self._state_changed.set()
+
     def _reset(self) -> None:
         if self._pixels is None:
             return
@@ -121,13 +133,42 @@ class StatusLed:
         self._pixels[0] = color
         self._pixels.show()
 
+    async def _wait_for_interval_or_state_change(
+        self,
+        interval_seconds: float,
+        blink_state: BlinkState,
+    ) -> bool:
+        sleep_task = asyncio.create_task(asyncio.sleep(interval_seconds))
+        event_task = asyncio.create_task(self._state_changed.wait())
+
+        _done, pending = await asyncio.wait(
+            {sleep_task, event_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        self._state_changed.clear()
+        return self._state_provider() != blink_state
+
     async def _blink_loop(self) -> None:
         try:
             while True:
-                color, interval_seconds = self._state_provider()
-                self._on = not self._on
-                self._set_color(color if self._on else OFF)
-                await asyncio.sleep(interval_seconds)
+                blink_state = self._state_provider()
+                color, interval_seconds = blink_state
+
+                if blink_state != self._active_blink:
+                    self._active_blink = blink_state
+                    self._on = True
+                    self._set_color(color)
+                else:
+                    self._on = not self._on
+                    self._set_color(color if self._on else OFF)
+
+                if await self._wait_for_interval_or_state_change(interval_seconds, blink_state):
+                    continue
         except asyncio.CancelledError:
             with contextlib.suppress(Exception):
                 self._reset()
@@ -136,9 +177,12 @@ class StatusLed:
             logger.exception("status led blink loop failed")
 
     def start(self) -> None:
+        global _status_led
+
         if not self.available or self._task is not None:
             return
 
+        _status_led = self
         self._register_exit_handler()
         self._task = asyncio.create_task(self._blink_loop())
         logger.info("status led blink started")
@@ -153,10 +197,14 @@ class StatusLed:
         self.close()
 
     def close(self) -> None:
+        global _status_led
+
         if self._closed:
             return
 
         self._closed = True
+        if _status_led is self:
+            _status_led = None
         with contextlib.suppress(Exception):
             self._reset()
 
