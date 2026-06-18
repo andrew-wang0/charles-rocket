@@ -76,7 +76,7 @@ export function ConnectionSettings() {
       </DialogTrigger>
       <DialogContent aria-describedby={undefined} className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Connection Host</DialogTitle>
+          <DialogTitle>Hardware Host</DialogTitle>
           <DialogClose asChild>
             <Button
               aria-label="Close connection host settings"
@@ -91,7 +91,7 @@ export function ConnectionSettings() {
 
         <form className="flex flex-col gap-4 p-4" onSubmit={handleSave}>
           <input
-            aria-label="Connection host"
+            aria-label="Hardware host"
             autoComplete="off"
             className={cn(
               "border-border bg-background h-8 w-full rounded-none border px-2 text-xs outline-none",

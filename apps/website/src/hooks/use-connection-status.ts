@@ -2,7 +2,8 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
-import { connect, connectionGeneration, ConnectionStatus, status, subscribe } from "@/client";
+import { connectionGeneration, ConnectionStatus, reconnect, status, subscribe } from "@/client";
+import { useBackendHost } from "@/hooks/use-backend-host";
 
 function getSnapshot() {
   return status;
@@ -13,9 +14,11 @@ function getServerSnapshot() {
 }
 
 export function useConnectionStatus() {
+  const backendHost = useBackendHost();
+
   useEffect(() => {
-    connect();
-  }, []);
+    reconnect();
+  }, [backendHost]);
 
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
@@ -29,9 +32,11 @@ function getConnectionGenerationServerSnapshot() {
 }
 
 export function useConnectionGeneration() {
+  const backendHost = useBackendHost();
+
   useEffect(() => {
-    connect();
-  }, []);
+    reconnect();
+  }, [backendHost]);
 
   return useSyncExternalStore(
     subscribe,
