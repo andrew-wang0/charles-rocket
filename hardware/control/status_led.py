@@ -27,13 +27,6 @@ OFF = (0, 0, 0)
 BlinkState = tuple[tuple[int, int, int], float]
 StateProvider = Callable[[], BlinkState]
 
-_status_led: StatusLed | None = None
-
-
-def notify_status_led_state_changed() -> None:
-    if _status_led is not None:
-        _status_led.notify_state_changed()
-
 
 def default_blink_state() -> BlinkState:
     return STATUS_LED_IDLE_COLOR, STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS
@@ -214,3 +207,14 @@ class StatusLed:
             self._pixels = None
 
         self.available = False
+
+
+_status_led: StatusLed | None = None
+
+
+def notify_status_led_state_changed() -> None:
+    if _status_led is not None:
+        _status_led.notify_state_changed()
+
+
+__all__ = ["StatusLed", "notify_status_led_state_changed"]
