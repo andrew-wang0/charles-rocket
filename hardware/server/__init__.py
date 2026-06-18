@@ -3,6 +3,7 @@ import contextlib
 import logging
 
 from calibration import load_calibration_set
+from control.status_led import StatusLed
 from logging_config import setup_logging
 from .audio import WavAudioRecorder, serve_audio_recorder
 from .video import serve_video_server
@@ -25,6 +26,15 @@ async def main() -> None:
     setup_logging()
     calibration_set = load_calibration_set()
     audio_recorder = WavAudioRecorder()
+    status_led = StatusLed()
+    if not status_led.available:
+        logger.warning(
+            "status led unavailable: %s",
+            status_led.error or "unknown_error",
+        )
+    else:
+        status_led.start()
+
     services = {
         "audio": asyncio.create_task(serve_audio_recorder(audio_recorder)),
         "websocket": asyncio.create_task(serve_websocket_server(calibration_set, audio_recorder)),
@@ -55,6 +65,8 @@ async def main() -> None:
         logger.warning("shutdown requested")
         raise
     finally:
+        await status_led.stop()
+
         for name, task in services.items():
             logger.info("shutting down %s service", name)
             task.cancel()

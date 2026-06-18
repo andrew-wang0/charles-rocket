@@ -2,6 +2,7 @@ aiohttp
 adafruit-blinka
 adafruit-circuitpython-ads1x15
 adafruit-circuitpython-motor
+adafruit-circuitpython-neopixel
 adafruit-circuitpython-pca9685
 rpi-lgpio
 websockets
