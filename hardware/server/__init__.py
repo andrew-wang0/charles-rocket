@@ -7,7 +7,7 @@ from control.status_led import StatusLed
 from logging_config import setup_logging
 from .audio import WavAudioRecorder, serve_audio_recorder
 from .video import serve_video_server
-from .websocket import serve_websocket_server
+from .websocket import get_status_led_blink, serve_websocket_server
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ async def main() -> None:
     setup_logging()
     calibration_set = load_calibration_set()
     audio_recorder = WavAudioRecorder()
-    status_led = StatusLed()
+    status_led = StatusLed(state_provider=get_status_led_blink)
     if not status_led.available:
         logger.warning(
             "status led unavailable: %s",

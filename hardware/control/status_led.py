@@ -5,12 +5,14 @@ import contextlib
 import importlib
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from config import (
-    STATUS_LED_BLINK_INTERVAL_SECONDS,
+    STATUS_LED_ALERT_BLINK_INTERVAL_SECONDS,
     STATUS_LED_DATA_PIN,
+    STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS,
     STATUS_LED_PIXEL_COUNT,
 )
 
@@ -18,7 +20,15 @@ logger = logging.getLogger(__name__)
 RASPBERRY_PI_SYSTEM_PACKAGES = Path("/usr/lib/python3/dist-packages")
 
 GREEN = (0, 255, 0)
+RED = (255, 0, 0)
 OFF = (0, 0, 0)
+
+BlinkState = tuple[tuple[int, int, int], float]
+StateProvider = Callable[[], BlinkState]
+
+
+def default_blink_state() -> BlinkState:
+    return GREEN, STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS
 
 
 class StatusLed:
@@ -26,9 +36,11 @@ class StatusLed:
         self,
         pin: int = STATUS_LED_DATA_PIN,
         pixel_count: int = STATUS_LED_PIXEL_COUNT,
+        state_provider: StateProvider | None = None,
     ) -> None:
         self._pixels: Any | None = None
         self._task: asyncio.Task[None] | None = None
+        self._state_provider = state_provider or default_blink_state
         self.available = False
         self.error: str | None = None
         self._pin = pin
@@ -71,9 +83,10 @@ class StatusLed:
     async def _blink_loop(self) -> None:
         try:
             while True:
+                color, interval_seconds = self._state_provider()
                 self._on = not self._on
-                self._set_color(GREEN if self._on else OFF)
-                await asyncio.sleep(STATUS_LED_BLINK_INTERVAL_SECONDS)
+                self._set_color(color if self._on else OFF)
+                await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
             raise
         except Exception:
