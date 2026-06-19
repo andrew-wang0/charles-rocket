@@ -225,6 +225,22 @@ export function buildRawLoadChartData(loadReadings: TimedReadings): LoadChartPoi
   }));
 }
 
+export function downsampleChartPoints<T extends { time: number }>(
+  points: T[],
+  maxPoints: number,
+): T[] {
+  const limit = Math.max(2, maxPoints);
+
+  if (points.length <= limit) {
+    return points;
+  }
+
+  return Array.from(
+    { length: limit },
+    (_, index) => points[Math.round((index * (points.length - 1)) / (limit - 1))],
+  );
+}
+
 export function appendLoadChartData(chartData: LoadChartPoint[], incomingReadings: TimedReadings) {
   let nextChartData = chartData;
 

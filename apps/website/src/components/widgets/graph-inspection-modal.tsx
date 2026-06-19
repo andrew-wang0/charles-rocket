@@ -28,6 +28,7 @@ import { chartConfig as pressureChartConfig } from "@/components/widgets/pressur
 import {
   buildRawLoadChartData,
   buildRawPressureChartData,
+  downsampleChartPoints,
   formatChartValue,
   formatClockTimestamp,
   type LoadChartPoint,
@@ -59,7 +60,7 @@ type HistoryRequest = {
 };
 
 const DEFAULT_INSPECTION_WINDOW_MS = 60_000;
-const INSPECTION_MAX_POINTS = 1_200;
+const INSPECTION_DISPLAY_MAX_POINTS = 1_200;
 const DATETIME_LOCAL_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 
@@ -85,6 +86,17 @@ function getReferenceValues(data: InspectionPoint[], series: SeriesConfig[]) {
       max: values.length > 0 ? Math.max(...values) : undefined,
     };
   });
+}
+
+function getVisibleData<TPoint extends { time: number }>(
+  data: TPoint[],
+  domain: readonly [number, number],
+) {
+  return data.filter((point) => point.time >= domain[0] && point.time <= domain[1]);
+}
+
+function rangeContains(outer: readonly [number, number], inner: readonly [number, number]) {
+  return inner[0] >= outer[0] && inner[1] <= outer[1];
 }
 
 function getInspectionCopy(kind: GraphKind) {
@@ -171,40 +183,45 @@ function getResolvedRange(
 
 export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   const copy = getInspectionCopy(kind);
-  const [pressureData, setPressureData] = React.useState<PressureChartPoint[]>([]);
-  const [loadData, setLoadData] = React.useState<LoadChartPoint[]>([]);
+  const [pressureCache, setPressureCache] = React.useState<PressureChartPoint[]>([]);
+  const [loadCache, setLoadCache] = React.useState<LoadChartPoint[]>([]);
+  const [cacheRange, setCacheRange] = React.useState<readonly [number, number] | null>(null);
+  const [viewDomain, setViewDomain] = React.useState<readonly [number, number] | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [queryDomain, setQueryDomain] = React.useState<readonly [number, number]>(() => {
-    const end = Date.now();
-    return [end - DEFAULT_INSPECTION_WINDOW_MS, end];
-  });
-  const [zoomParentRange, setZoomParentRange] = React.useState<readonly [number, number] | null>(
-    null,
-  );
   const [startInput, setStartInput] = React.useState("");
   const [endInput, setEndInput] = React.useState("");
   const [hiddenSeries, setHiddenSeries] = React.useState<Set<string>>(() => new Set());
   const [selectionStart, setSelectionStart] = React.useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = React.useState<number | null>(null);
 
-  const data = (kind === "pressure" ? pressureData : loadData) as InspectionPoint[];
+  const cachedData = (kind === "pressure" ? pressureCache : loadCache) as InspectionPoint[];
+  const activeDomain = viewDomain ?? cacheRange;
+  const visibleData = React.useMemo(() => {
+    if (!activeDomain) return cachedData;
+
+    return getVisibleData(cachedData, activeDomain);
+  }, [activeDomain, cachedData]);
+  const displayData = React.useMemo(
+    () => downsampleChartPoints(visibleData, INSPECTION_DISPLAY_MAX_POINTS),
+    [visibleData],
+  );
   const visibleSeries = React.useMemo(
     () => copy.series.filter((entry) => !hiddenSeries.has(entry.key)),
     [copy.series, hiddenSeries],
   );
   const referenceValues = React.useMemo(
-    () => getReferenceValues(data, visibleSeries),
-    [data, visibleSeries],
+    () => getReferenceValues(visibleData, visibleSeries),
+    [visibleData, visibleSeries],
   );
   const legendValues = React.useMemo(
-    () => getReferenceValues(data, copy.series),
-    [copy.series, data],
+    () => getReferenceValues(visibleData, copy.series),
+    [copy.series, visibleData],
   );
-  const hasZoom = zoomParentRange !== null;
+  const hasZoom = viewDomain !== null;
 
   const loadHistory = React.useCallback(
-    async (request: HistoryRequest, options?: { zoomParent?: readonly [number, number] }) => {
+    async (request: HistoryRequest) => {
       setLoading(true);
       setError(null);
 
@@ -213,7 +230,6 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
           history: true,
           includeLoad: kind === "load",
           includePressure: kind === "pressure",
-          maxPoints: INSPECTION_MAX_POINTS,
           ...(request.range
             ? {
                 startTime: request.range[0],
@@ -223,10 +239,10 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
                 windowMs: request.windowMs ?? DEFAULT_INSPECTION_WINDOW_MS,
               }),
         });
-        const nextPressureData =
+        const nextPressureCache =
           kind === "pressure" ? buildRawPressureChartData(result.data.pressure) : [];
-        const nextLoadData = kind === "load" ? buildRawLoadChartData(result.data.load) : [];
-        const nextData = (kind === "pressure" ? nextPressureData : nextLoadData) as
+        const nextLoadCache = kind === "load" ? buildRawLoadChartData(result.data.load) : [];
+        const nextData = (kind === "pressure" ? nextPressureCache : nextLoadCache) as
           | PressureChartPoint[]
           | LoadChartPoint[];
         const nextRange = getResolvedRange(
@@ -235,12 +251,12 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
           result.timeRange,
         );
 
-        setPressureData(nextPressureData);
-        setLoadData(nextLoadData);
-        setQueryDomain(nextRange);
+        setPressureCache(nextPressureCache);
+        setLoadCache(nextLoadCache);
+        setCacheRange(nextRange);
+        setViewDomain(null);
         setStartInput(toDatetimeLocalValue(nextRange[0]));
         setEndInput(toDatetimeLocalValue(nextRange[1]));
-        setZoomParentRange(options?.zoomParent ?? null);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Unable to load graph history");
       } finally {
@@ -290,7 +306,9 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
     const end = Math.max(selectionStart, selectionEnd);
 
     if (end - start > 10) {
-      void loadHistory({ range: [start, end] }, { zoomParent: queryDomain });
+      setViewDomain([start, end]);
+      setStartInput(toDatetimeLocalValue(start));
+      setEndInput(toDatetimeLocalValue(end));
     }
 
     setSelectionStart(null);
@@ -298,9 +316,12 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   }
 
   function resetZoom() {
-    if (zoomParentRange === null) return;
+    if (cacheRange) {
+      setStartInput(toDatetimeLocalValue(cacheRange[0]));
+      setEndInput(toDatetimeLocalValue(cacheRange[1]));
+    }
 
-    void loadHistory({ range: zoomParentRange });
+    setViewDomain(null);
     setSelectionStart(null);
     setSelectionEnd(null);
   }
@@ -314,7 +335,15 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
       return;
     }
 
-    void loadHistory({ range: [start, end] });
+    const range = [start, end] as const;
+
+    if (cacheRange && rangeContains(cacheRange, range)) {
+      setError(null);
+      setViewDomain(range);
+      return;
+    }
+
+    void loadHistory({ range });
   }
 
   function toggleSeries(key: string) {
@@ -406,7 +435,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
             <div className="text-destructive flex flex-1 items-center justify-center text-xs">
               {error}
             </div>
-          ) : data.length === 0 ? (
+          ) : cachedData.length === 0 ? (
             <div className="text-muted-foreground flex flex-1 items-center justify-center text-xs">
               No recorded data
             </div>
@@ -418,7 +447,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
               >
                 <LineChart
                   accessibilityLayer
-                  data={data}
+                  data={displayData}
                   margin={{ top: 10, right: 18, bottom: 2, left: 6 }}
                   onMouseDown={(event) => beginSelection(event.activeLabel)}
                   onMouseMove={(event) => updateSelection(event.activeLabel)}
