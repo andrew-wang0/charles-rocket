@@ -3,6 +3,7 @@
 import { createClient } from "@danscan/zod-jsonrpc";
 
 import { router } from "@/client/router";
+import { abortResult } from "@/client/router/control/abort";
 import {
   ignitionControlResult,
   type IgnitionSnapshot,
@@ -77,6 +78,13 @@ function handleNotification(message: unknown) {
 }
 
 function applyKnownResult(result: unknown) {
+  const abortResponse = abortResult.safeParse(result);
+  if (abortResponse.success) {
+    applyIgnitionSnapshot({ state: abortResponse.data.state });
+    applyServoSnapshot({ states: abortResponse.data.states });
+    return;
+  }
+
   const servoControlResponse = servoControlResult.safeParse(result);
   if (servoControlResponse.success) {
     applyServoSnapshot({ states: servoControlResponse.data.states });

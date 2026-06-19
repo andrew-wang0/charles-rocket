@@ -238,6 +238,20 @@ class ServoController:
             logger.info("servo all set requested: channels=%s target=%s", SERVO_CHANNELS, target_state)
             return await self._start_transitions(list(SERVO_CHANNELS), target_state)
 
+    async def fast_close_all_servos(self) -> None:
+        async with self._lock:
+            self._ensure_available()
+            logger.warning("servo fast close all requested: channels=%s", SERVO_CHANNELS)
+
+            for channel in SERVO_CHANNELS:
+                try:
+                    self._set_angle_sync(channel, "closed")
+                except Exception as exc:
+                    logger.exception("failed fast close servo channel=%s", channel)
+                    raise ValueError("servo_hardware_error") from exc
+
+                self._states[channel] = "closed"
+
     async def _start_transitions(self, channels: list[int], target_state: ServoStableState) -> list[int]:
         for channel in channels:
             current_state = self._states[channel]

@@ -713,6 +713,42 @@ async def handle_servo_set_angle(
     }
 
 
+async def cancel_transition_tasks() -> None:
+    tasks = tuple(transition_tasks)
+
+    for task in tasks:
+        task.cancel()
+
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    transition_tasks.clear()
+
+
+async def handle_abort(websocket: Any) -> dict[str, Any]:
+    await cancel_transition_tasks()
+
+    try:
+        await get_ignition_controller().set_state("OFF")
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    try:
+        await get_servo_controller().fast_close_all_servos()
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    notify_status_led_state_changed()
+    await broadcast_ignition_state(exclude=websocket)
+    await broadcast_servo_state(exclude=websocket)
+
+    return {
+        "result": "success",
+        **build_ignition_snapshot(),
+        **build_servo_snapshot(),
+    }
+
+
 async def handle_ignition_control(
     websocket: Any,
     params: Any,
@@ -808,6 +844,9 @@ async def dispatch_request(
 
     if method == "ignitionState":
         return build_ignition_snapshot()
+
+    if method == "abort":
+        return await handle_abort(websocket)
 
     if method == "syncSystemTime":
         return await handle_sync_system_time(params)

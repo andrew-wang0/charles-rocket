@@ -239,8 +239,8 @@ export function VideoWidget() {
           <img
             ref={imageRef}
             key={streamKey}
-            alt="Live camera feed"
-            className="h-full w-full object-contain object-center"
+            alt={hasSignal ? "Live camera feed" : ""}
+            className={cn("h-full w-full object-contain object-center", !hasSignal && "invisible")}
             decoding="async"
             loading="eager"
             onError={() => {
@@ -254,8 +254,10 @@ export function VideoWidget() {
             src={streamUrl}
           />
           {!hasSignal ? (
-            <div className="bg-muted text-muted-foreground absolute border p-2 text-sm">
-              NO VIDEO SIGNAL
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <div className="bg-muted text-muted-foreground border p-2 text-sm">
+                NO VIDEO SIGNAL
+              </div>
             </div>
           ) : null}
         </div>
