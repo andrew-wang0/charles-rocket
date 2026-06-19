@@ -59,6 +59,7 @@ type HistoryRequest = {
 };
 
 const DEFAULT_INSPECTION_WINDOW_MS = 60_000;
+const INSPECTION_MAX_POINTS = 1_200;
 const DATETIME_LOCAL_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
 
@@ -72,12 +73,6 @@ const LOAD_SERIES = [
   { key: "load", label: "Load", color: loadChartConfig.load.color },
 ] satisfies SeriesConfig[];
 
-function getDomain(data: Array<{ time: number }>, fallback: readonly [number, number]) {
-  const first = data.at(0)?.time ?? fallback[0];
-  const last = data.at(-1)?.time ?? fallback[1];
-  return [first, last] as const;
-}
-
 function getReferenceValues(data: InspectionPoint[], series: SeriesConfig[]) {
   return series.map((entry) => {
     const values = data
@@ -90,13 +85,6 @@ function getReferenceValues(data: InspectionPoint[], series: SeriesConfig[]) {
       max: values.length > 0 ? Math.max(...values) : undefined,
     };
   });
-}
-
-function getVisibleData<TPoint extends { time: number }>(
-  data: TPoint[],
-  domain: readonly [number, number],
-) {
-  return data.filter((point) => point.time >= domain[0] && point.time <= domain[1]);
 }
 
 function getInspectionCopy(kind: GraphKind) {
@@ -191,7 +179,9 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
     const end = Date.now();
     return [end - DEFAULT_INSPECTION_WINDOW_MS, end];
   });
-  const [domain, setDomain] = React.useState<readonly [number, number] | null>(null);
+  const [zoomParentRange, setZoomParentRange] = React.useState<readonly [number, number] | null>(
+    null,
+  );
   const [startInput, setStartInput] = React.useState("");
   const [endInput, setEndInput] = React.useState("");
   const [hiddenSeries, setHiddenSeries] = React.useState<Set<string>>(() => new Set());
@@ -203,22 +193,18 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
     () => copy.series.filter((entry) => !hiddenSeries.has(entry.key)),
     [copy.series, hiddenSeries],
   );
-  const fullDomain = React.useMemo(() => getDomain(data, queryDomain), [data, queryDomain]);
-  const activeDomain = domain ?? fullDomain;
-  const visibleData = React.useMemo(() => getVisibleData(data, activeDomain), [activeDomain, data]);
-  const renderData = visibleData;
   const referenceValues = React.useMemo(
-    () => getReferenceValues(visibleData, visibleSeries),
-    [visibleData, visibleSeries],
+    () => getReferenceValues(data, visibleSeries),
+    [data, visibleSeries],
   );
   const legendValues = React.useMemo(
-    () => getReferenceValues(visibleData, copy.series),
-    [copy.series, visibleData],
+    () => getReferenceValues(data, copy.series),
+    [copy.series, data],
   );
-  const hasZoom = domain !== null;
+  const hasZoom = zoomParentRange !== null;
 
   const loadHistory = React.useCallback(
-    async (request: HistoryRequest) => {
+    async (request: HistoryRequest, options?: { zoomParent?: readonly [number, number] }) => {
       setLoading(true);
       setError(null);
 
@@ -227,6 +213,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
           history: true,
           includeLoad: kind === "load",
           includePressure: kind === "pressure",
+          maxPoints: INSPECTION_MAX_POINTS,
           ...(request.range
             ? {
                 startTime: request.range[0],
@@ -253,7 +240,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
         setQueryDomain(nextRange);
         setStartInput(toDatetimeLocalValue(nextRange[0]));
         setEndInput(toDatetimeLocalValue(nextRange[1]));
-        setDomain(null);
+        setZoomParentRange(options?.zoomParent ?? null);
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Unable to load graph history");
       } finally {
@@ -303,7 +290,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
     const end = Math.max(selectionStart, selectionEnd);
 
     if (end - start > 10) {
-      setDomain([start, end]);
+      void loadHistory({ range: [start, end] }, { zoomParent: queryDomain });
     }
 
     setSelectionStart(null);
@@ -311,7 +298,9 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
   }
 
   function resetZoom() {
-    setDomain(null);
+    if (zoomParentRange === null) return;
+
+    void loadHistory({ range: zoomParentRange });
     setSelectionStart(null);
     setSelectionEnd(null);
   }
@@ -429,7 +418,7 @@ export function GraphInspectionModal({ kind, open, onOpenChange }: Props) {
               >
                 <LineChart
                   accessibilityLayer
-                  data={renderData}
+                  data={data}
                   margin={{ top: 10, right: 18, bottom: 2, left: 6 }}
                   onMouseDown={(event) => beginSelection(event.activeLabel)}
                   onMouseMove={(event) => updateSelection(event.activeLabel)}

@@ -339,6 +339,7 @@ function handleReadings(params: unknown) {
   let startTime = getOptionalNumber(payload.startTime);
   let endTime = getOptionalNumber(payload.endTime);
   const windowMs = getOptionalNumber(payload.windowMs);
+  const maxPoints = getOptionalNumber(payload.maxPoints);
 
   if (includeHistory && windowMs !== undefined) {
     endTime ??= serverTime;
@@ -346,13 +347,14 @@ function handleReadings(params: unknown) {
   }
 
   const loadData = includeLoad
-    ? includeHistory
-      ? loadHistory(startTime, endTime)
-      : latestLoadPayload()
+    ? limitHistory(
+        includeHistory ? loadHistory(startTime, endTime) : latestLoadPayload(),
+        maxPoints,
+      )
     : [];
   const pressureData = includePressure
     ? includeHistory
-      ? pressureHistory(startTime, endTime)
+      ? pressureHistory(startTime, endTime).map((readings) => limitHistory(readings, maxPoints))
       : latestPressurePayload()
     : emptyPressurePayload();
 
@@ -444,6 +446,27 @@ function filterHistory(buffer: TimedReading[], startTime?: number, endTime?: num
     if (startTime !== undefined && reading.time < startTime) return false;
     return !(endTime !== undefined && reading.time > endTime);
   });
+}
+
+function downsampleHistory(readings: TimedReading[], maxPoints: number) {
+  const limit = Math.max(2, maxPoints);
+
+  if (readings.length <= limit) {
+    return readings;
+  }
+
+  return Array.from(
+    { length: limit },
+    (_, index) => readings[Math.round((index * (readings.length - 1)) / (limit - 1))],
+  );
+}
+
+function limitHistory(readings: TimedReading[], maxPoints?: number) {
+  if (maxPoints === undefined) {
+    return readings;
+  }
+
+  return downsampleHistory(readings, maxPoints);
 }
 
 function appendPressureSample(now: number) {
