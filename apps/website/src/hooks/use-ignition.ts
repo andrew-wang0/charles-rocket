@@ -20,8 +20,10 @@ export function useIgnition() {
 export function useIgnitionControl() {
   const ignition = useIgnition();
   const pendingCount = useStore((store) => store.ignitionPendingCount);
+  const servoAbortClosingUntilMs = useStore((store) => store.servoAbortClosingUntilMs);
   const startIgnitionRequest = useStore((store) => store.startIgnitionRequest);
   const finishIgnitionRequest = useStore((store) => store.finishIgnitionRequest);
+  const abortClosingActive = servoAbortClosingUntilMs > Date.now();
 
   async function setIgnition(targetState: IgnitionTargetState) {
     startIgnitionRequest();
@@ -36,13 +38,13 @@ export function useIgnitionControl() {
   }
 
   async function toggle() {
-    if (pendingCount > 0 || ignition.isUnknown) return;
+    if (pendingCount > 0 || abortClosingActive || ignition.isUnknown) return;
     await setIgnition(ignition.isOn ? IgnitionState.OFF : IgnitionState.ON);
   }
 
   return {
     ...ignition,
-    isBusy: pendingCount > 0,
+    isBusy: pendingCount > 0 || abortClosingActive,
     toggle,
     setIgnition,
   };

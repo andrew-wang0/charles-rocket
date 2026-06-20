@@ -19,6 +19,9 @@ from config import (
     SERVO_CHANNELS,
     STATUS_LED_ALERT_BLINK_INTERVAL_SECONDS,
     STATUS_LED_ALERT_COLOR,
+    STATUS_LED_ABORT_BLINK_INTERVAL_SECONDS,
+    STATUS_LED_ABORT_COLOR,
+    STATUS_LED_ABORT_FLASH_SECONDS,
     STATUS_LED_IDLE_BLINK_INTERVAL_SECONDS,
     STATUS_LED_IDLE_COLOR,
     SYSTEM_TIME_SYNC_COMMAND_TIMEOUT_SECONDS,
@@ -58,9 +61,39 @@ clients: set[Any] = set()
 client_send_locks: dict[Any, asyncio.Lock] = {}
 transition_tasks: set[asyncio.Task[None]] = set()
 startup_tasks: set[asyncio.Task[None]] = set()
+_abort_led_flash_until: float = 0.0
+_abort_led_flash_notify_task: asyncio.Task[None] | None = None
+
+
+def start_abort_led_flash() -> None:
+    global _abort_led_flash_until, _abort_led_flash_notify_task
+
+    _abort_led_flash_until = time.monotonic() + STATUS_LED_ABORT_FLASH_SECONDS
+    notify_status_led_state_changed()
+
+    if _abort_led_flash_notify_task is not None:
+        _abort_led_flash_notify_task.cancel()
+
+    task = asyncio.create_task(_notify_abort_led_flash_end())
+    _abort_led_flash_notify_task = task
+
+
+async def _notify_abort_led_flash_end() -> None:
+    global _abort_led_flash_notify_task
+
+    try:
+        await asyncio.sleep(STATUS_LED_ABORT_FLASH_SECONDS)
+        notify_status_led_state_changed()
+    except asyncio.CancelledError:
+        raise
+    finally:
+        _abort_led_flash_notify_task = None
 
 
 def get_status_led_blink() -> tuple[tuple[int, int, int], float]:
+    if time.monotonic() < _abort_led_flash_until:
+        return STATUS_LED_ABORT_COLOR, STATUS_LED_ABORT_BLINK_INTERVAL_SECONDS
+
     if ignition_controller is not None and ignition_controller.available:
         if ignition_controller.state_payload()["state"] == "ON":
             return STATUS_LED_ALERT_COLOR, STATUS_LED_ALERT_BLINK_INTERVAL_SECONDS
@@ -726,6 +759,7 @@ async def cancel_transition_tasks() -> None:
 
 
 async def handle_abort(websocket: Any) -> dict[str, Any]:
+    start_abort_led_flash()
     await cancel_transition_tasks()
 
     try:

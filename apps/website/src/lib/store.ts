@@ -60,9 +60,12 @@ type Store = {
   finishIgnitionRequest: () => void;
 
   servoStates: ServoState[];
+  servoAbortClosingUntilMs: number;
   setServoState: (index: number, state: ServoState) => void;
   syncServoStates: (states: { index: number; state: ServoState }[]) => void;
   resetServoStates: () => void;
+  startServoAbortClosing: (durationMs: number) => void;
+  clearServoAbortClosing: () => void;
 };
 
 function createInitialServoStates() {
@@ -205,6 +208,7 @@ export const useStore = create<Store>((set) => ({
     })),
 
   servoStates: createInitialServoStates(),
+  servoAbortClosingUntilMs: 0,
 
   setServoState: (index, servoState) =>
     set((state) => {
@@ -225,4 +229,12 @@ export const useStore = create<Store>((set) => ({
     }),
 
   resetServoStates: () => set({ servoStates: createInitialServoStates() }),
+  startServoAbortClosing: (durationMs) =>
+    set((state) => ({
+      servoAbortClosingUntilMs: Math.max(
+        state.servoAbortClosingUntilMs,
+        Date.now() + Math.max(0, durationMs),
+      ),
+    })),
+  clearServoAbortClosing: () => set({ servoAbortClosingUntilMs: 0 }),
 }));

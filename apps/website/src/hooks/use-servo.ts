@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import { client } from "@/client";
 import { SERVO_COUNT } from "@/lib/constants";
+import { SERVO_ABORT_CLOSE_TRANSITION_MS } from "@/lib/servo-transition";
 import { useStore } from "@/lib/store";
 import { ServoState } from "@/types/servo";
 
@@ -61,20 +62,27 @@ export function useServo(index: number) {
 
 export function useServoGroup(indexes: number[]) {
   const servoStates = useStore((store) => store.servoStates);
+  const servoAbortClosingUntilMs = useStore((store) => store.servoAbortClosingUntilMs);
 
   return useMemo(() => {
+    const abortClosingActive = servoAbortClosingUntilMs > Date.now();
     const states = indexes.map((index) => servoStates[index] ?? ServoState.UNKNOWN);
+    const visibleStates = abortClosingActive
+      ? states.map((state) => (state === ServoState.UNKNOWN ? state : ServoState.CLOSING))
+      : states;
 
     return {
-      states,
-      state: getServoAggregateState(states),
-      isBusy: states.some(isServoSwitching),
-      isSwitching: states.some(isServoSwitching),
+      states: visibleStates,
+      state: getServoAggregateState(visibleStates),
+      isBusy: abortClosingActive || visibleStates.some(isServoSwitching),
+      isSwitching: abortClosingActive || visibleStates.some(isServoSwitching),
+      isAbortClosing: abortClosingActive,
+      abortTransitionMs: SERVO_ABORT_CLOSE_TRANSITION_MS,
       anyUnknown: states.some((state) => state === ServoState.UNKNOWN),
       allOpen: states.length > 0 && states.every((state) => state === ServoState.OPEN),
       allClosed: states.length > 0 && states.every((state) => state === ServoState.CLOSED),
     };
-  }, [indexes, servoStates]);
+  }, [indexes, servoAbortClosingUntilMs, servoStates]);
 }
 
 export function useServoControl(indexes: number[] = []) {

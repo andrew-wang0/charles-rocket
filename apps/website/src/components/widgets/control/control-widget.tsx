@@ -19,7 +19,6 @@ export function ControlWidget() {
         <CardHeader>
           <CardTitle>Control</CardTitle>
           <CardAction className="flex items-center gap-1">
-            <ControlAbortButton />
             <WidgetLockToggleButton />
           </CardAction>
         </CardHeader>
@@ -34,6 +33,8 @@ export function ControlWidget() {
             <ControlServo indexes={[3]} className="min-w-0 flex-1" />
             <Separator orientation="vertical" />
             <ControlServo indexes={[4]} className="min-w-0 flex-1" />
+            <Separator orientation="vertical" />
+            <ControlAbortButton className="h-full w-10 shrink-0 px-0" orientation="vertical" />
           </div>
         </CardContent>
       </WidgetCard>
