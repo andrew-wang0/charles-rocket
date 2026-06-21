@@ -274,7 +274,7 @@ function getServoTransitionMs(index: number, targetState: ServoState.OPEN | Serv
   }
 
   if (targetState === ServoState.OPEN && SERVO_MEDIUM_SLOW_OPEN_INDEXES.has(index)) {
-    return SERVO_MEDIUM_SLOW_OPEN_TRANSITION_MS;
+    return SERVO_TRANSITION_MS + SERVO_MEDIUM_SLOW_OPEN_TRANSITION_MS;
   }
 
   if (targetState === ServoState.CLOSED && SERVO_SLOW_CLOSE_INDEXES.has(index)) {
