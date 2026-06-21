@@ -22,7 +22,6 @@ from config import (
     SERVO_SLOW_CLOSE_SECONDS,
     SERVO_SLOW_CLOSE_STEP_SECONDS,
     SERVO_MEDIUM_SLOW_OPEN_CHANNELS,
-    SERVO_MEDIUM_SLOW_OPEN_FAST_DEGREES,
     SERVO_MEDIUM_SLOW_OPEN_SECONDS,
     SERVO_MEDIUM_SLOW_OPEN_STEP_SECONDS,
     SERVO_SLOW_OPEN_CHANNELS,
@@ -168,42 +167,16 @@ class ServoController:
             self._set_angle_sync(channel, "closed")
             self._states[channel] = "closed"
 
-    def _angle_toward_open(self, channel: int, from_angle: float, degrees: float) -> float:
-        open_angle = self._open_angles[channel]
-        close_angle = self._close_angles[channel]
-
-        if close_angle > open_angle:
-            return max(open_angle, from_angle - degrees)
-
-        return min(open_angle, from_angle + degrees)
-
-    def _medium_slow_open_fast_end_angle(self, channel: int) -> float:
-        return self._angle_toward_open(
-            channel,
-            self._close_angles[channel],
-            SERVO_MEDIUM_SLOW_OPEN_FAST_DEGREES,
-        )
-
-    def _is_more_closed_than(self, channel: int, angle: float, reference: float) -> bool:
-        open_angle = self._open_angles[channel]
-        close_angle = self._close_angles[channel]
-
-        if close_angle > open_angle:
-            return angle > reference
-
-        return angle < reference
-
-    def _uses_medium_slow_open(self, channel: int, target_state: ServoStableState) -> bool:
-        return channel in SERVO_MEDIUM_SLOW_OPEN_CHANNELS and target_state == "open"
-
-    def _uses_standard_slow_open(self, channel: int, target_state: ServoStableState) -> bool:
-        return channel in SERVO_SLOW_OPEN_CHANNELS and target_state == "open"
-
     def _uses_slow_open(self, channel: int, target_state: ServoStableState) -> bool:
-        return self._uses_standard_slow_open(channel, target_state) or self._uses_medium_slow_open(
-            channel,
-            target_state,
-        )
+        return (
+            channel in SERVO_SLOW_OPEN_CHANNELS or channel in SERVO_MEDIUM_SLOW_OPEN_CHANNELS
+        ) and target_state == "open"
+
+    def _slow_open_timing(self, channel: int) -> tuple[float, float]:
+        if channel in SERVO_MEDIUM_SLOW_OPEN_CHANNELS:
+            return SERVO_MEDIUM_SLOW_OPEN_SECONDS, SERVO_MEDIUM_SLOW_OPEN_STEP_SECONDS
+
+        return SERVO_SLOW_OPEN_SECONDS, SERVO_SLOW_OPEN_STEP_SECONDS
 
     def _uses_slow_close(self, channel: int, target_state: ServoStableState) -> bool:
         return channel in SERVO_SLOW_CLOSE_CHANNELS and target_state == "closed"
@@ -319,60 +292,6 @@ class ServoController:
 
         return started_channels
 
-    async def _slow_move_between_angles(
-        self,
-        channel: int,
-        start_angle: float,
-        end_angle: float,
-        seconds: float,
-        step_seconds: float,
-        transition_state: ServoTransitionState,
-    ) -> None:
-        step_count = max(1, round(seconds / step_seconds))
-        step_sleep = seconds / step_count
-
-        logger.info(
-            "servo slow move started: channel=%s from=%s to=%s seconds=%s",
-            channel,
-            start_angle,
-            end_angle,
-            seconds,
-        )
-
-        for step in range(1, step_count + 1):
-            await asyncio.sleep(step_sleep)
-            async with self._lock:
-                if self._states[channel] != transition_state:
-                    logger.info("servo slow move interrupted: channel=%s", channel)
-                    return
-
-                angle = start_angle + (end_angle - start_angle) * (step / step_count)
-                try:
-                    self._servos[channel].angle = angle
-                except Exception as exc:
-                    logger.exception(
-                        "failed slow move servo channel=%s angle=%s",
-                        channel,
-                        angle,
-                    )
-                    raise ValueError("servo_hardware_error") from exc
-
-                self._angles[channel] = angle
-
-        async with self._lock:
-            if self._states[channel] != transition_state:
-                logger.info("servo slow move interrupted: channel=%s", channel)
-                return
-
-            self._servos[channel].angle = end_angle
-            self._angles[channel] = end_angle
-
-        logger.info(
-            "servo slow move finished: channel=%s angle=%s",
-            channel,
-            end_angle,
-        )
-
     async def _slow_move_channel(
         self,
         channel: int,
@@ -390,6 +309,8 @@ class ServoController:
 
         target_angle = self._target_angle(channel, target_state)
         transition_state = self._transition_state_for_target(target_state)
+        step_count = max(1, round(seconds / step_seconds))
+        step_sleep = seconds / step_count
 
         logger.info(
             "servo slow %s started: channel=%s from=%s to=%s seconds=%s",
@@ -400,15 +321,34 @@ class ServoController:
             seconds,
         )
 
-        await self._slow_move_between_angles(
-            channel,
-            start_angle,
-            target_angle,
-            seconds,
-            step_seconds,
-            transition_state,
-        )
+        for step in range(1, step_count + 1):
+            await asyncio.sleep(step_sleep)
+            async with self._lock:
+                if self._states[channel] != transition_state:
+                    logger.info("servo slow %s interrupted: channel=%s", target_state, channel)
+                    return
 
+                angle = start_angle + (target_angle - start_angle) * (step / step_count)
+                try:
+                    self._servos[channel].angle = angle
+                except Exception as exc:
+                    logger.exception(
+                        "failed slow %s servo channel=%s angle=%s",
+                        target_state,
+                        channel,
+                        angle,
+                    )
+                    raise ValueError("servo_hardware_error") from exc
+
+                self._angles[channel] = angle
+
+        async with self._lock:
+            if self._states[channel] != transition_state:
+                logger.info("servo slow %s interrupted: channel=%s", target_state, channel)
+                return
+
+            self._servos[channel].angle = target_angle
+            self._angles[channel] = target_angle
         logger.info(
             "servo slow %s finished: channel=%s angle=%s",
             target_state,
@@ -416,76 +356,13 @@ class ServoController:
             target_angle,
         )
 
-    async def _medium_slow_open_channel(self, channel: int) -> None:
-        transition_state = "opening"
-        start_angle = self._angles[channel]
-        if start_angle is None:
-            start_angle = self._close_angles[channel]
-
-        fast_end_angle = self._medium_slow_open_fast_end_angle(channel)
-        target_angle = self._open_angles[channel]
-        slow_start_angle = start_angle
-
-        if self._is_more_closed_than(channel, start_angle, fast_end_angle):
-            async with self._lock:
-                if self._states[channel] != transition_state:
-                    logger.info(
-                        "servo medium slow open interrupted: channel=%s phase=fast",
-                        channel,
-                    )
-                    return
-
-                try:
-                    self._servos[channel].angle = fast_end_angle
-                except Exception as exc:
-                    logger.exception(
-                        "failed medium slow open fast phase channel=%s angle=%s",
-                        channel,
-                        fast_end_angle,
-                    )
-                    raise ValueError("servo_hardware_error") from exc
-
-                self._angles[channel] = fast_end_angle
-
-            logger.info(
-                "servo medium slow open fast phase finished: channel=%s angle=%s",
-                channel,
-                fast_end_angle,
-            )
-            slow_start_angle = fast_end_angle
-
-        if not self._is_more_closed_than(channel, slow_start_angle, target_angle):
-            return
-
-        logger.info(
-            "servo medium slow open slow phase started: channel=%s from=%s to=%s seconds=%s",
-            channel,
-            slow_start_angle,
-            target_angle,
-            SERVO_MEDIUM_SLOW_OPEN_SECONDS,
-        )
-
-        await self._slow_move_between_angles(
-            channel,
-            slow_start_angle,
-            target_angle,
-            SERVO_MEDIUM_SLOW_OPEN_SECONDS,
-            SERVO_MEDIUM_SLOW_OPEN_STEP_SECONDS,
-            transition_state,
-        )
-
-        logger.info(
-            "servo medium slow open finished: channel=%s angle=%s",
-            channel,
-            target_angle,
-        )
-
     async def _slow_open_channel(self, channel: int) -> None:
+        seconds, step_seconds = self._slow_open_timing(channel)
         await self._slow_move_channel(
             channel,
             "open",
-            SERVO_SLOW_OPEN_SECONDS,
-            SERVO_SLOW_OPEN_STEP_SECONDS,
+            seconds,
+            step_seconds,
         )
 
     async def _slow_close_channel(self, channel: int) -> None:
@@ -513,9 +390,7 @@ class ServoController:
         channel = channels[0]
         transition_state = self._transition_state_for_target(target_state)
 
-        if self._uses_medium_slow_open(channel, target_state):
-            await self._medium_slow_open_channel(channel)
-        elif self._uses_standard_slow_open(channel, target_state):
+        if self._uses_slow_open(channel, target_state):
             await self._slow_open_channel(channel)
         elif self._uses_slow_close(channel, target_state):
             await self._slow_close_channel(channel)
