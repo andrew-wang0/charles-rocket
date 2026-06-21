@@ -22,6 +22,9 @@ from config import (
     SERVO_SLOW_CLOSE_SECONDS,
     SERVO_SLOW_CLOSE_STEP_SECONDS,
     SERVO_MEDIUM_SLOW_OPEN_CHANNELS,
+    SERVO_MEDIUM_SLOW_OPEN_DELAY_SECONDS,
+    SERVO_MEDIUM_SLOW_OPEN_DELAYED_CHANNEL,
+    SERVO_MEDIUM_SLOW_OPEN_LEAD_CHANNEL,
     SERVO_MEDIUM_SLOW_OPEN_SECONDS,
     SERVO_MEDIUM_SLOW_OPEN_STEP_SECONDS,
     SERVO_SLOW_OPEN_CHANNELS,
@@ -186,6 +189,15 @@ class ServoController:
             channel,
             target_state,
         )
+
+    async def _slow_open_delay_seconds(self, channel: int, target_state: ServoStableState) -> float:
+        if target_state != "open" or channel != SERVO_MEDIUM_SLOW_OPEN_DELAYED_CHANNEL:
+            return 0.0
+
+        async with self._lock:
+            lead_state = self._states[SERVO_MEDIUM_SLOW_OPEN_LEAD_CHANNEL]
+
+        return SERVO_MEDIUM_SLOW_OPEN_DELAY_SECONDS if lead_state == "opening" else 0.0
 
     def _can_start_transition(
         self,
@@ -391,6 +403,19 @@ class ServoController:
         transition_state = self._transition_state_for_target(target_state)
 
         if self._uses_slow_open(channel, target_state):
+            open_delay_seconds = await self._slow_open_delay_seconds(channel, target_state)
+            if open_delay_seconds > 0:
+                logger.info(
+                    "servo slow open delayed: channel=%s seconds=%s",
+                    channel,
+                    open_delay_seconds,
+                )
+                await asyncio.sleep(open_delay_seconds)
+                async with self._lock:
+                    if self._states[channel] != transition_state:
+                        logger.info("servo slow open delay interrupted: channel=%s", channel)
+                        return
+
             await self._slow_open_channel(channel)
         elif self._uses_slow_close(channel, target_state):
             await self._slow_close_channel(channel)

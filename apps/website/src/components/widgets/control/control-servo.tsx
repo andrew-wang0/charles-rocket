@@ -7,7 +7,11 @@ import { useWidgetLock } from "@/components/widgets/widget-lock";
 import { WidgetLockableButton } from "@/components/widgets/widget-lockable-button";
 import { WidgetNoSignal } from "@/components/widgets/widget-no-signal";
 import { useServoControl } from "@/hooks/use-servo";
-import { getClosingTransitionSeconds, getOpeningTransitionSeconds } from "@/lib/servo-transition";
+import {
+  getClosingTransitionSeconds,
+  getOpeningDelaySeconds,
+  getOpeningTransitionSeconds,
+} from "@/lib/servo-transition";
 import { cn } from "@/lib/util/cn";
 import { ServoState } from "@/types/servo";
 
@@ -18,12 +22,7 @@ type Props = {
 function assertCompatibleServoGroup(indexes: number[]) {
   if (indexes.length <= 1) return;
 
-  const openingTimes = indexes.map(getOpeningTransitionSeconds);
   const closingTimes = indexes.map((index) => getClosingTransitionSeconds(index));
-
-  if (!openingTimes.every((time) => time === openingTimes[0])) {
-    throw new Error(`Servo group [${indexes.join(", ")}] has mismatched opening transition times`);
-  }
 
   if (!closingTimes.every((time) => time === closingTimes[0])) {
     throw new Error(`Servo group [${indexes.join(", ")}] has mismatched closing transition times`);
@@ -53,24 +52,30 @@ function getStatusClassName(state: ServoState) {
   }
 }
 
-function getTransitionSeconds(index: number, state: ServoState, isAbortClosing: boolean) {
+function getTransitionSeconds(indexes: number[], state: ServoState, isAbortClosing: boolean) {
+  if (indexes.length === 0) {
+    return null;
+  }
+
   if (state === ServoState.OPENING) {
-    return getOpeningTransitionSeconds(index);
+    return Math.max(
+      ...indexes.map(
+        (index) => getOpeningTransitionSeconds(index) + getOpeningDelaySeconds(index, indexes),
+      ),
+    );
   }
 
   if (state === ServoState.CLOSING) {
-    return getClosingTransitionSeconds(index, { fast: isAbortClosing });
+    return Math.max(
+      ...indexes.map((index) => getClosingTransitionSeconds(index, { fast: isAbortClosing })),
+    );
   }
 
   return null;
 }
 
 function useServoRemainingSeconds(indexes: number[], state: ServoState, isAbortClosing: boolean) {
-  const referenceIndex = indexes[0];
-  const transitionSeconds =
-    referenceIndex === undefined
-      ? null
-      : getTransitionSeconds(referenceIndex, state, isAbortClosing);
+  const transitionSeconds = getTransitionSeconds(indexes, state, isAbortClosing);
   const [startedAt, setStartedAt] = React.useState(() => Date.now());
   const [now, setNow] = React.useState(() => Date.now());
 

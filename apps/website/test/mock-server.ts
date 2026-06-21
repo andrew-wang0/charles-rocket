@@ -14,6 +14,9 @@ const DEFAULT_HOST = "0.0.0.0";
 const SERVO_TRANSITION_MS = 400;
 const SERVO_SLOW_TRANSITION_MS = 15_000;
 const SERVO_MEDIUM_SLOW_OPEN_TRANSITION_MS = 2_000;
+const SERVO_MEDIUM_SLOW_OPEN_DELAY_MS = 500;
+const SERVO_MEDIUM_SLOW_OPEN_DELAYED_INDEX = 1;
+const SERVO_MEDIUM_SLOW_OPEN_LEAD_INDEX = 2;
 const SERVO_SLOW_OPEN_INDEXES = new Set([0, 3]);
 const SERVO_MEDIUM_SLOW_OPEN_INDEXES = new Set([1, 2]);
 const SERVO_SLOW_CLOSE_INDEXES = new Set([1, 2, 3]);
@@ -201,6 +204,7 @@ function startServoTransitions(
   targetState: ServoState.OPEN | ServoState.CLOSED,
 ) {
   const transitionedIndexes: number[] = [];
+  const requestIndexes = new Set(indexes);
 
   for (const index of indexes) {
     const currentState = servoStates[index];
@@ -220,7 +224,7 @@ function startServoTransitions(
     clearServoTransition(index);
     servoStates[index] = getServoTransitionState(targetState);
     transitionedIndexes.push(index);
-    scheduleServoTransitionFinish(index, targetState);
+    scheduleServoTransitionFinish(index, targetState, requestIndexes);
   }
 
   return transitionedIndexes;
@@ -229,19 +233,18 @@ function startServoTransitions(
 function scheduleServoTransitionFinish(
   index: number,
   targetState: ServoState.OPEN | ServoState.CLOSED,
+  requestIndexes: Set<number>,
 ) {
   const transitionState = getServoTransitionState(targetState);
-  const timer = setTimeout(
-    () => {
-      servoTransitionTimers.delete(index);
+  const transitionMs = getServoTransitionMs(index, targetState, requestIndexes);
+  const timer = setTimeout(() => {
+    servoTransitionTimers.delete(index);
 
-      if (servoStates[index] !== transitionState) return;
+    if (servoStates[index] !== transitionState) return;
 
-      servoStates[index] = targetState;
-      broadcastServoState();
-    },
-    getServoTransitionMs(index, targetState),
-  );
+    servoStates[index] = targetState;
+    broadcastServoState();
+  }, transitionMs);
 
   servoTransitionTimers.set(index, timer);
 }
@@ -268,12 +271,24 @@ function getServoTransitionState(targetState: ServoState.OPEN | ServoState.CLOSE
   return targetState === ServoState.OPEN ? ServoState.OPENING : ServoState.CLOSING;
 }
 
-function getServoTransitionMs(index: number, targetState: ServoState.OPEN | ServoState.CLOSED) {
+function getServoTransitionMs(
+  index: number,
+  targetState: ServoState.OPEN | ServoState.CLOSED,
+  requestIndexes: Set<number>,
+) {
   if (targetState === ServoState.OPEN && SERVO_SLOW_OPEN_INDEXES.has(index)) {
     return SERVO_SLOW_TRANSITION_MS;
   }
 
   if (targetState === ServoState.OPEN && SERVO_MEDIUM_SLOW_OPEN_INDEXES.has(index)) {
+    const hasStaggerPair =
+      requestIndexes.has(SERVO_MEDIUM_SLOW_OPEN_DELAYED_INDEX) &&
+      requestIndexes.has(SERVO_MEDIUM_SLOW_OPEN_LEAD_INDEX);
+
+    if (hasStaggerPair && index === SERVO_MEDIUM_SLOW_OPEN_DELAYED_INDEX) {
+      return SERVO_MEDIUM_SLOW_OPEN_TRANSITION_MS + SERVO_MEDIUM_SLOW_OPEN_DELAY_MS;
+    }
+
     return SERVO_MEDIUM_SLOW_OPEN_TRANSITION_MS;
   }
 
