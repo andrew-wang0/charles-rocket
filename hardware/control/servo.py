@@ -21,6 +21,9 @@ from config import (
     SERVO_SLOW_CLOSE_CHANNELS,
     SERVO_SLOW_CLOSE_SECONDS,
     SERVO_SLOW_CLOSE_STEP_SECONDS,
+    SERVO_MEDIUM_SLOW_OPEN_CHANNELS,
+    SERVO_MEDIUM_SLOW_OPEN_SECONDS,
+    SERVO_MEDIUM_SLOW_OPEN_STEP_SECONDS,
     SERVO_SLOW_OPEN_CHANNELS,
     SERVO_SLOW_OPEN_SECONDS,
     SERVO_SLOW_OPEN_STEP_SECONDS,
@@ -165,7 +168,15 @@ class ServoController:
             self._states[channel] = "closed"
 
     def _uses_slow_open(self, channel: int, target_state: ServoStableState) -> bool:
-        return channel in SERVO_SLOW_OPEN_CHANNELS and target_state == "open"
+        return (
+            channel in SERVO_SLOW_OPEN_CHANNELS or channel in SERVO_MEDIUM_SLOW_OPEN_CHANNELS
+        ) and target_state == "open"
+
+    def _slow_open_timing(self, channel: int) -> tuple[float, float]:
+        if channel in SERVO_MEDIUM_SLOW_OPEN_CHANNELS:
+            return SERVO_MEDIUM_SLOW_OPEN_SECONDS, SERVO_MEDIUM_SLOW_OPEN_STEP_SECONDS
+
+        return SERVO_SLOW_OPEN_SECONDS, SERVO_SLOW_OPEN_STEP_SECONDS
 
     def _uses_slow_close(self, channel: int, target_state: ServoStableState) -> bool:
         return channel in SERVO_SLOW_CLOSE_CHANNELS and target_state == "closed"
@@ -346,11 +357,12 @@ class ServoController:
         )
 
     async def _slow_open_channel(self, channel: int) -> None:
+        seconds, step_seconds = self._slow_open_timing(channel)
         await self._slow_move_channel(
             channel,
             "open",
-            SERVO_SLOW_OPEN_SECONDS,
-            SERVO_SLOW_OPEN_STEP_SECONDS,
+            seconds,
+            step_seconds,
         )
 
     async def _slow_close_channel(self, channel: int) -> None:

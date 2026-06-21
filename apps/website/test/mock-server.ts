@@ -13,7 +13,9 @@ const DEFAULT_PORT = 8765;
 const DEFAULT_HOST = "0.0.0.0";
 const SERVO_TRANSITION_MS = 400;
 const SERVO_SLOW_TRANSITION_MS = 15_000;
+const SERVO_MEDIUM_SLOW_OPEN_TRANSITION_MS = 3_000;
 const SERVO_SLOW_OPEN_INDEXES = new Set([0, 3]);
+const SERVO_MEDIUM_SLOW_OPEN_INDEXES = new Set([1, 2]);
 const SERVO_SLOW_CLOSE_INDEXES = new Set([1, 2, 3]);
 
 type JsonRpcId = string | number | null;
@@ -269,6 +271,10 @@ function getServoTransitionState(targetState: ServoState.OPEN | ServoState.CLOSE
 function getServoTransitionMs(index: number, targetState: ServoState.OPEN | ServoState.CLOSED) {
   if (targetState === ServoState.OPEN && SERVO_SLOW_OPEN_INDEXES.has(index)) {
     return SERVO_SLOW_TRANSITION_MS;
+  }
+
+  if (targetState === ServoState.OPEN && SERVO_MEDIUM_SLOW_OPEN_INDEXES.has(index)) {
+    return SERVO_MEDIUM_SLOW_OPEN_TRANSITION_MS;
   }
 
   if (targetState === ServoState.CLOSED && SERVO_SLOW_CLOSE_INDEXES.has(index)) {
